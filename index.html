@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Tablero de Rutas — Albion Online</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  html, body { margin: 0; }
+  body {
+    --bg: #12161f;
+    --panel: #1a2029;
+    --panel-raised: #1f2733;
+    --hairline: #2b3342;
+    --gold: #c9a227;
+    --gold-bright: #e8c34a;
+    --teal: #4a9483;
+    --red: #b23a3a;
+    --text: #e8e2d0;
+    --text-muted: #9aa0ad;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+  }
+  #atb-root { padding: 28px; max-width: 1100px; margin: 0 auto; box-sizing: border-box; }
+  #atb-root * { box-sizing: border-box; }
+
+  .atb-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 22px; border-bottom: 1px solid var(--hairline); padding-bottom: 18px; flex-wrap: wrap; gap: 10px; }
+  .atb-title { font-family: 'Cinzel', serif; font-weight: 700; font-size: 26px; letter-spacing: 0.5px; color: var(--gold-bright); margin: 0; }
+  .atb-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 4px; letter-spacing: 0.3px; }
+  .atb-badge { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--teal); border: 1px solid var(--teal); padding: 4px 10px; border-radius: 3px; text-transform: uppercase; letter-spacing: 1px; }
+
+  .atb-panel { background: var(--panel); border: 1px solid var(--hairline); border-radius: 6px; padding: 18px; margin-bottom: 18px; }
+  .atb-controls-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; align-items: end; }
+  .atb-field label { display: block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 6px; }
+  .atb-field select, .atb-field input[type=number], .atb-field input[type=date], .atb-field input[type=text] {
+    width: 100%; background: var(--panel-raised); border: 1px solid var(--hairline); color: var(--text);
+    padding: 8px 10px; border-radius: 4px; font-family: 'IBM Plex Mono', monospace; font-size: 13px;
+  }
+  .atb-field select:focus, .atb-field input:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+
+  .atb-btn { background: var(--gold); color: #1a1206; border: none; padding: 10px 18px; border-radius: 4px; font-family: 'Inter', sans-serif; font-weight: 700; font-size: 13px; cursor: pointer; letter-spacing: 0.3px; transition: background 0.15s ease; }
+  .atb-btn:hover { background: var(--gold-bright); }
+  .atb-btn:disabled { background: #4a4632; color: #8a8570; cursor: wait; }
+  .atb-btn:focus-visible { outline: 2px solid var(--gold-bright); outline-offset: 2px; }
+
+  .atb-tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--hairline); }
+  .atb-tab { background: none; border: none; color: var(--text-muted); padding: 10px 16px; font-family: 'Inter', sans-serif; font-weight: 600; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; }
+  .atb-tab.active { color: var(--gold-bright); border-bottom-color: var(--gold); }
+  .atb-tab:focus-visible { outline: 2px solid var(--gold); }
+
+  .atb-risk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .atb-risk-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+  .atb-risk-item input[type=range] { width: 90px; accent-color: var(--gold); }
+  .atb-seal { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; flex-shrink: 0; }
+
+  table.atb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.atb-table th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); padding: 8px 10px; border-bottom: 1px solid var(--hairline); font-weight: 600; }
+  table.atb-table td { padding: 10px 10px; border-bottom: 1px solid #212936; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; }
+  table.atb-table tr:hover td { background: rgba(201, 162, 39, 0.05); }
+  .atb-item-name { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 13px; }
+  .atb-route { color: var(--text-muted); font-family: 'Inter', sans-serif; font-size: 12px; }
+  .atb-route .arrow { color: var(--gold); margin: 0 4px; }
+  .atb-profit-pos { color: #7fc9a3; font-weight: 600; }
+  .atb-profit-neg { color: #d97a7a; }
+  .atb-stale { color: var(--red); font-size: 10px; margin-left: 6px; }
+  .atb-tier-pill { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 10px; padding: 2px 6px; border-radius: 3px; background: var(--panel-raised); color: var(--teal); border: 1px solid var(--hairline); }
+
+  .atb-empty { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 13px; }
+  .atb-note { font-size: 11.5px; color: var(--text-muted); line-height: 1.6; border-left: 2px solid var(--gold); padding: 10px 14px; background: var(--panel-raised); border-radius: 0 4px 4px 0; margin-top: 16px; }
+  .atb-note strong { color: var(--text); }
+  .atb-scroll { overflow-x: auto; }
+
+  .atb-event-form { display: grid; grid-template-columns: 140px 1fr 130px 130px auto; gap: 10px; align-items: end; margin-bottom: 18px; }
+  .atb-event-form textarea { grid-column: 1 / -1; background: var(--panel-raised); border: 1px solid var(--hairline); color: var(--text); padding: 8px 10px; border-radius: 4px; font-family: 'Inter', sans-serif; font-size: 12.5px; resize: vertical; min-height: 40px; }
+  .atb-timeline { display: flex; flex-direction: column; gap: 10px; }
+  .atb-event-card { background: var(--panel-raised); border: 1px solid var(--hairline); border-left: 3px solid var(--gold); border-radius: 0 5px 5px 0; padding: 12px 14px; display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+  .atb-event-card.impact-alto { border-left-color: var(--red); }
+  .atb-event-card.impact-medio { border-left-color: var(--gold); }
+  .atb-event-card.impact-bajo { border-left-color: var(--teal); }
+  .atb-event-meta { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .atb-event-title { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 13.5px; margin-bottom: 4px; }
+  .atb-event-notes { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+  .atb-event-del { background: none; border: 1px solid var(--hairline); color: var(--text-muted); border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; flex-shrink: 0; }
+  .atb-event-del:hover { border-color: var(--red); color: var(--red); }
+
+  @media (max-width: 700px) { .atb-event-form { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+
+<div id="atb-root">
+  <div class="atb-header">
+    <div>
+      <p class="atb-title">Tablero de Rutas — Albion Online</p>
+      <p class="atb-subtitle">Precios guardados por el cron cada hora · Supabase + Render</p>
+    </div>
+    <span class="atb-badge" id="atb-status">Sin cargar</span>
+  </div>
+
+  <div class="atb-panel">
+    <div class="atb-controls-grid">
+      <div class="atb-field">
+        <label for="atb-server">Servidor</label>
+        <select id="atb-server">
+          <option value="west">Americas (West)</option>
+          <option value="europe">Europe</option>
+          <option value="east">Asia (East)</option>
+        </select>
+      </div>
+      <div class="atb-field">
+        <label for="atb-tax">Impuesto de venta (%)</label>
+        <input type="number" id="atb-tax" value="4" min="0" max="20" step="0.5">
+      </div>
+      <div class="atb-field">
+        <label for="atb-minmargin">Margen mínimo (plata)</label>
+        <input type="number" id="atb-minmargin" value="200" min="0" step="50">
+      </div>
+      <div class="atb-field">
+        <label for="atb-maxstale">Antigüedad máx. del dato (horas)</label>
+        <input type="number" id="atb-maxstale" value="12" min="1" step="1">
+      </div>
+      <div class="atb-field">
+        <button class="atb-btn" id="atb-refresh">Traer últimos precios</button>
+      </div>
+      <div class="atb-field">
+        <button class="atb-btn" id="atb-save-config" style="background:var(--teal); color:#0d1712;">Guardar configuración</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="atb-panel">
+    <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; display:block; margin-bottom:10px;">
+      Riesgo relativo por ciudad
+    </label>
+    <div class="atb-risk-grid" id="atb-risk-grid"></div>
+  </div>
+
+  <div class="atb-tabs">
+    <button class="atb-tab active" data-tab="items">Por item</button>
+    <button class="atb-tab" data-tab="routes">Por ruta</button>
+    <button class="atb-tab" data-tab="history">Historial</button>
+    <button class="atb-tab" data-tab="events">Eventos</button>
+  </div>
+
+  <div class="atb-panel">
+    <div class="atb-scroll">
+      <div id="atb-content"><div class="atb-empty">Cargando datos guardados...</div></div>
+    </div>
+  </div>
+
+  <div class="atb-note">
+    <strong>Cómo funciona ahora:</strong> un cron interno en el backend consulta la API del Albion Data Project cada hora y guarda los precios en Supabase.
+    Esta página solo lee lo que el backend ya tiene guardado — el botón "Traer últimos precios" fuerza una actualización manual si no quieres esperar al cron.
+  </div>
+</div>
+
+<script>
+(function() {
+  const ITEMS = {{ items_json | safe }};
+  const CITIES = {{ cities_json | safe }};
+
+  const statusEl = document.getElementById('atb-status');
+  const contentEl = document.getElementById('atb-content');
+  const riskGridEl = document.getElementById('atb-risk-grid');
+  let activeTab = 'items';
+  let lastRows = [];
+  let riskValues = {};
+  let config = {};
+  let selectedHistoryItem = null;
+
+  function riskColor(risk) {
+    if (risk >= 60) return '#b23a3a';
+    if (risk >= 35) return '#c9a227';
+    return '#4a9483';
+  }
+
+  function buildRiskGrid() {
+    riskGridEl.innerHTML = '';
+    CITIES.forEach(c => {
+      const val = riskValues[c.id] ?? 30;
+      const row = document.createElement('div');
+      row.className = 'atb-risk-item';
+      row.innerHTML = `
+        <span><span class="atb-seal" style="background:${riskColor(val)}"></span>${c.name}</span>
+        <input type="range" min="0" max="100" value="${val}" data-city="${c.id}">
+      `;
+      riskGridEl.appendChild(row);
+    });
+    riskGridEl.querySelectorAll('input[type=range]').forEach(inp => {
+      inp.addEventListener('input', e => {
+        riskValues[e.target.dataset.city] = Number(e.target.value);
+        const seal = e.target.previousElementSibling.querySelector('.atb-seal');
+        seal.style.background = riskColor(riskValues[e.target.dataset.city]);
+        if (lastRows.length) render();
+      });
+    });
+  }
+
+  document.querySelectorAll('.atb-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.atb-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      activeTab = tab.dataset.tab;
+      render();
+    });
+  });
+
+  async function loadConfig() {
+    const res = await fetch('/api/config');
+    config = await res.json();
+    riskValues = config.riesgo_ciudades || {};
+    document.getElementById('atb-server').value = config.servidor || 'west';
+    document.getElementById('atb-tax').value = config.impuesto ?? 4;
+    document.getElementById('atb-minmargin').value = config.margen_minimo ?? 200;
+    document.getElementById('atb-maxstale').value = config.max_antiguedad_horas ?? 12;
+    buildRiskGrid();
+  }
+
+  document.getElementById('atb-save-config').addEventListener('click', async () => {
+    const btn = document.getElementById('atb-save-config');
+    btn.textContent = 'Guardando...';
+    await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        servidor: document.getElementById('atb-server').value,
+        impuesto: Number(document.getElementById('atb-tax').value),
+        margen_minimo: Number(document.getElementById('atb-minmargin').value),
+        max_antiguedad_horas: Number(document.getElementById('atb-maxstale').value),
+        riesgo_ciudades: riskValues,
+      }),
+    });
+    btn.textContent = 'Guardar configuración';
+  });
+
+  async function fetchPrices() {
+    const btn = document.getElementById('atb-refresh');
+    btn.disabled = true;
+    btn.textContent = 'Consultando...';
+    statusEl.textContent = 'Cargando...';
+    try {
+      const res = await fetch('/api/cron/actualizar-precios');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      await loadPrices();
+    } catch (err) {
+      statusEl.textContent = 'Error al actualizar';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Traer últimos precios';
+    }
+  }
+
+  async function loadPrices() {
+    const res = await fetch('/api/precios');
+    const data = await res.json();
+    processData(data);
+    statusEl.textContent = `${data.length} registros guardados · ${new Date().toLocaleTimeString('es-CO')}`;
+  }
+
+  function processData(data) {
+    const byItem = {};
+    data.forEach(rec => {
+      if (!byItem[rec.item_id]) byItem[rec.item_id] = {};
+      byItem[rec.item_id][rec.city] = rec;
+    });
+
+    const rows = [];
+    const now = Date.now();
+
+    ITEMS.forEach(item => {
+      const cityData = byItem[item.id];
+      if (!cityData) return;
+      CITIES.forEach(origin => {
+        CITIES.forEach(dest => {
+          if (origin.id === dest.id) return;
+          const o = cityData[origin.id];
+          const d = cityData[dest.id];
+          if (!o || !d) return;
+          const buyPrice = o.sell_price_min;
+          const sellPrice = d.buy_price_max;
+          if (!buyPrice || !sellPrice || buyPrice <= 0) return;
+          const buyDate = o.sell_price_min_date ? new Date(o.sell_price_min_date).getTime() : 0;
+          const sellDate = d.buy_price_max_date ? new Date(d.buy_price_max_date).getTime() : 0;
+          const ageHours = Math.min(
+            buyDate ? (now - buyDate) / 3600000 : 999,
+            sellDate ? (now - sellDate) / 3600000 : 999
+          );
+          rows.push({ item, origin, dest, buyPrice, sellPrice, ageHours });
+        });
+      });
+    });
+
+    lastRows = rows;
+    render();
+  }
+
+  function computeMargin(row) {
+    const tax = Number(document.getElementById('atb-tax').value) / 100;
+    const revenue = row.sellPrice * (1 - tax);
+    const margin = revenue - row.buyPrice;
+    const marginPct = (margin / row.buyPrice) * 100;
+    const avgRisk = ((riskValues[row.origin.id] ?? 30) + (riskValues[row.dest.id] ?? 30)) / 2;
+    const riskAdjScore = margin * (1 - avgRisk / 150);
+    return { margin, marginPct, avgRisk, riskAdjScore };
+  }
+
+  function render() {
+    if (activeTab === 'history') { renderHistory(); return; }
+    if (activeTab === 'events') { renderEvents(); return; }
+    if (!lastRows.length) return;
+
+    const minMargin = Number(document.getElementById('atb-minmargin').value);
+    const maxStale = Number(document.getElementById('atb-maxstale').value);
+
+    let enriched = lastRows
+      .filter(r => r.ageHours <= maxStale)
+      .map(r => ({ ...r, ...computeMargin(r) }))
+      .filter(r => r.margin >= minMargin);
+
+    if (activeTab === 'items') {
+      const bestByItem = {};
+      enriched.forEach(r => {
+        if (!bestByItem[r.item.id] || r.riskAdjScore > bestByItem[r.item.id].riskAdjScore) bestByItem[r.item.id] = r;
+      });
+      renderTable(Object.values(bestByItem).sort((a, b) => b.riskAdjScore - a.riskAdjScore));
+    } else {
+      const byRoute = {};
+      enriched.forEach(r => {
+        const key = r.origin.id + '->' + r.dest.id;
+        if (!byRoute[key]) byRoute[key] = { origin: r.origin, dest: r.dest, items: [] };
+        byRoute[key].items.push(r);
+      });
+      const list = Object.values(byRoute).map(route => {
+        const best = route.items.sort((a, b) => b.riskAdjScore - a.riskAdjScore)[0];
+        return { ...best, itemCount: route.items.length };
+      }).sort((a, b) => b.riskAdjScore - a.riskAdjScore);
+      renderTable(list);
+    }
+  }
+
+  function renderTable(list) {
+    if (!list.length) {
+      contentEl.innerHTML = '<div class="atb-empty">No hay rutas rentables con los filtros actuales, o todavía no hay precios guardados. Dale clic a "Traer últimos precios".</div>';
+      return;
+    }
+    let extraCol = activeTab === 'routes' ? '<th>Items rentables</th>' : '<th>Tier</th>';
+    let html = `<table class="atb-table"><thead><tr>
+      <th>Item</th><th>Ruta</th>${extraCol}<th>Compra</th><th>Venta</th><th>Margen</th><th>Margen %</th><th>Riesgo</th><th>Puntaje</th>
+    </tr></thead><tbody>`;
+    list.slice(0, 40).forEach(r => {
+      const staleWarn = r.ageHours > 6 ? `<span class="atb-stale">●</span>` : '';
+      const extraCell = activeTab === 'routes' ? `<td>${r.itemCount}</td>` : `<td><span class="atb-tier-pill">T${r.item.tier}</span></td>`;
+      html += `<tr>
+        <td class="atb-item-name">${r.item.name}${staleWarn}</td>
+        <td class="atb-route">${r.origin.name}<span class="arrow">→</span>${r.dest.name}</td>
+        ${extraCell}
+        <td>${Math.round(r.buyPrice).toLocaleString('es-CO')}</td>
+        <td>${Math.round(r.sellPrice).toLocaleString('es-CO')}</td>
+        <td class="${r.margin >= 0 ? 'atb-profit-pos' : 'atb-profit-neg'}">${Math.round(r.margin).toLocaleString('es-CO')}</td>
+        <td class="${r.marginPct >= 0 ? 'atb-profit-pos' : 'atb-profit-neg'}">${r.marginPct.toFixed(1)}%</td>
+        <td><span class="atb-seal" style="background:${riskColor(r.avgRisk)}"></span>${Math.round(r.avgRisk)}</td>
+        <td>${Math.round(r.riskAdjScore).toLocaleString('es-CO')}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    contentEl.innerHTML = html;
+  }
+
+  async function renderHistory() {
+    contentEl.innerHTML = '<div class="atb-empty">Cargando historial...</div>';
+    const itemOptions = ITEMS.map(i => `<option value="${i.id}" ${i.id === selectedHistoryItem ? 'selected' : ''}>${i.name}</option>`).join('');
+    if (!selectedHistoryItem) selectedHistoryItem = ITEMS[0].id;
+
+    const res = await fetch('/api/historial?item_id=' + selectedHistoryItem);
+    const entries = await res.json();
+
+    let rowsHtml = entries.map(e => `
+      <tr>
+        <td>${new Date(e.ts).toLocaleString('es-CO', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'})}</td>
+        <td class="atb-route">${e.origin}<span class="arrow">→</span>${e.dest}</td>
+        <td class="${e.margin >= 0 ? 'atb-profit-pos' : 'atb-profit-neg'}">${Math.round(e.margin).toLocaleString('es-CO')}</td>
+        <td class="${e.margin_pct >= 0 ? 'atb-profit-pos' : 'atb-profit-neg'}">${e.margin_pct}%</td>
+      </tr>`).join('');
+
+    contentEl.innerHTML = `
+      <div class="atb-field" style="max-width:280px; margin-bottom:16px;">
+        <label for="atb-history-select">Item</label>
+        <select id="atb-history-select">${itemOptions}</select>
+      </div>
+      <table class="atb-table"><thead><tr><th>Fecha</th><th>Mejor ruta</th><th>Margen</th><th>Margen %</th></tr></thead>
+      <tbody>${rowsHtml || '<tr><td colspan="4" class="atb-empty">Sin registros todavía para este item — se llena solo con cada corrida del cron.</td></tr>'}</tbody></table>
+    `;
+    document.getElementById('atb-history-select').addEventListener('change', e => {
+      selectedHistoryItem = e.target.value;
+      renderHistory();
+    });
+  }
+
+  async function renderEvents() {
+    contentEl.innerHTML = '<div class="atb-empty">Cargando eventos...</div>';
+    const res = await fetch('/api/eventos');
+    const events = await res.json();
+
+    const typeLabels = { parche: 'Parche', expansion: 'Expansión', profesion: 'Cambio de profesión', evento: 'Evento temporal' };
+    const impactLabels = { alto: 'Impacto alto', medio: 'Impacto medio', bajo: 'Impacto bajo' };
+
+    const cards = events.map(e => `
+      <div class="atb-event-card impact-${e.impacto}">
+        <div>
+          <div class="atb-event-meta">${e.fecha} · ${typeLabels[e.tipo] || e.tipo} · ${impactLabels[e.impacto] || e.impacto}</div>
+          <div class="atb-event-title">${e.titulo}</div>
+          <div class="atb-event-notes">${e.notas || ''}</div>
+        </div>
+        <button class="atb-event-del" data-id="${e.id}">Borrar</button>
+      </div>`).join('');
+
+    contentEl.innerHTML = `
+      <div class="atb-event-form">
+        <div class="atb-field"><label for="atb-ev-date">Fecha</label><input type="date" id="atb-ev-date"></div>
+        <div class="atb-field"><label for="atb-ev-title">Título</label><input type="text" id="atb-ev-title" placeholder="Ej: Nerf a la profesión de herrería"></div>
+        <div class="atb-field"><label for="atb-ev-type">Tipo</label>
+          <select id="atb-ev-type">
+            <option value="parche">Parche</option><option value="expansion">Expansión</option>
+            <option value="profesion">Cambio de profesión</option><option value="evento">Evento temporal</option>
+          </select>
+        </div>
+        <div class="atb-field"><label for="atb-ev-impact">Impacto</label>
+          <select id="atb-ev-impact"><option value="alto">Alto</option><option value="medio" selected>Medio</option><option value="bajo">Bajo</option></select>
+        </div>
+        <button class="atb-btn" id="atb-ev-add">Agregar</button>
+        <textarea id="atb-ev-notes" placeholder="Notas: qué cambia y qué items podría afectar..."></textarea>
+      </div>
+      <div class="atb-timeline">${cards || '<div class="atb-empty">Todavía no hay eventos registrados.</div>'}</div>
+    `;
+
+    document.getElementById('atb-ev-add').addEventListener('click', async () => {
+      const fecha = document.getElementById('atb-ev-date').value;
+      const titulo = document.getElementById('atb-ev-title').value.trim();
+      if (!fecha || !titulo) return;
+      await fetch('/api/eventos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fecha, titulo,
+          tipo: document.getElementById('atb-ev-type').value,
+          impacto: document.getElementById('atb-ev-impact').value,
+          notas: document.getElementById('atb-ev-notes').value.trim(),
+        }),
+      });
+      renderEvents();
+    });
+
+    contentEl.querySelectorAll('.atb-event-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch('/api/eventos/' + btn.dataset.id, { method: 'DELETE' });
+        renderEvents();
+      });
+    });
+  }
+
+  document.getElementById('atb-refresh').addEventListener('click', fetchPrices);
+  document.getElementById('atb-tax').addEventListener('change', render);
+  document.getElementById('atb-minmargin').addEventListener('change', render);
+  document.getElementById('atb-maxstale').addEventListener('change', render);
+
+  (async function init() {
+    await loadConfig();
+    await loadPrices();
+  })();
+})();
+</script>
+</body>
+</html>
