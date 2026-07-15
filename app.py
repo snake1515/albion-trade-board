@@ -236,9 +236,16 @@ def api_config():
     return jsonify(get_config())
 
 
+@app.route("/api/refrescar")
+def api_refrescar():
+    """Endpoint sin token, para el botón manual dentro de la propia página."""
+    fetch_and_store_prices()
+    return jsonify({"status": "ok"})
+
+
 @app.route("/api/cron/actualizar-precios")
 def api_cron_trigger():
-    """Endpoint para forzar una actualización manual (botón en la UI)."""
+    """Endpoint protegido por token, pensado para un cron externo (ej. cron-job.org)."""
     token = request.args.get("token", "")
     if CRON_SECRET and token != CRON_SECRET:
         return jsonify({"error": "no autorizado"}), 401
@@ -248,3 +255,6 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
