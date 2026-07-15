@@ -241,7 +241,7 @@
     btn.textContent = 'Consultando...';
     statusEl.textContent = 'Cargando...';
     try {
-      const res = await fetch('/api/cron/actualizar-precios');
+      const res = await fetch('/api/refrescar');
       if (!res.ok) throw new Error('HTTP ' + res.status);
       await loadPrices();
     } catch (err) {
@@ -309,7 +309,10 @@
   function render() {
     if (activeTab === 'history') { renderHistory(); return; }
     if (activeTab === 'events') { renderEvents(); return; }
-    if (!lastRows.length) return;
+    if (!lastRows.length) {
+      contentEl.innerHTML = '<div class="atb-empty">Todavía no hay precios guardados. Dale clic a "Traer últimos precios" para la primera carga (el cron automático corre cada hora).</div>';
+      return;
+    }
 
     const minMargin = Number(document.getElementById('atb-minmargin').value);
     const maxStale = Number(document.getElementById('atb-maxstale').value);
@@ -473,3 +476,4 @@
 </script>
 </body>
 </html>
+
