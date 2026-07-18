@@ -793,13 +793,48 @@
     muerte: { label: 'Morí', incidente: true, cls: 'atb-profit-neg' },
   };
 
+  const MOUNT_INFO = {
+    'Buey': {
+      pros: 'Carga mucha mercancía, barato, fácil de reponer si muere.',
+      contras: 'Muy lento, casi cero chance de escapar si te emboscan.',
+    },
+    'Mamut': {
+      pros: 'La mayor capacidad de carga del juego, ideal para envíos grandes.',
+      contras: 'Costo altísimo (100M+), lentísimo, el objetivo #1 de cualquier ganker. Nunca solo.',
+    },
+    'Ciervo Gigante': {
+      pros: 'Buen punto medio: carga bastante más que un caballo y es razonablemente rápido.',
+      contras: 'Carga menos que un buey/mamut; no es tan veloz como un huargo.',
+    },
+    'Alce': {
+      pros: 'Similar al ciervo gigante, buena mezcla de velocidad y carga moderada.',
+      contras: 'No destaca en nada en particular frente al ciervo gigante; menos popular.',
+    },
+    'Caballo': {
+      pros: 'Barato, accesible desde tier bajo, buen balance velocidad/carga liviana.',
+      contras: 'Carga poco; no sirve para envíos grandes de mercancía.',
+    },
+    'Huargo': {
+      pros: 'Una de las monturas más veloces del juego, ideal para moverte tú solo rápido.',
+      contras: 'HP muy bajo y cero capacidad de carga extra — no sirve para transportar mercancía.',
+    },
+    'Garra Veloz': {
+      pros: 'Rápida y económica, accesible desde tier bajo, buena para mandados sin carga.',
+      contras: 'Prácticamente no carga peso extra; poca resistencia si te atrapan.',
+    },
+    'Otro': {
+      pros: '—',
+      contras: '—',
+    },
+  };
+
   async function renderViajes() {
     contentEl.innerHTML = '<div class="atb-empty">Cargando viajes...</div>';
     const res = await fetch('/api/viajes');
     const viajes = await res.json();
 
     const cityOptions = CITIES.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-    const monturaOptions = ['Buey', 'Mamut', 'Ciervo Gigante', 'Alce', 'Caballo', 'Otro']
+    const monturaOptions = ['Buey', 'Mamut', 'Ciervo Gigante', 'Alce', 'Caballo', 'Huargo', 'Garra Veloz', 'Otro']
       .map(m => `<option value="${m}">${m}</option>`).join('');
     const resultadoOptions = Object.entries(RESULTADO_INFO)
       .map(([key, r]) => `<option value="${key}">${r.label}</option>`).join('');
@@ -824,6 +859,15 @@
       });
       resumenHtml += '</tbody></table>';
     }
+
+    const mountRefHtml = `<table class="atb-table"><thead><tr><th>Montura</th><th>A favor</th><th>En contra</th></tr></thead><tbody>
+      ${Object.entries(MOUNT_INFO).filter(([m]) => m !== 'Otro').map(([m, info]) => `
+        <tr>
+          <td class="atb-item-name">${m}</td>
+          <td class="atb-profit-pos" style="font-size:11.5px;">${info.pros}</td>
+          <td class="atb-profit-neg" style="font-size:11.5px;">${info.contras}</td>
+        </tr>`).join('')}
+    </tbody></table>`;
 
     function rowFor(v) {
       const info = RESULTADO_INFO[v.resultado] || RESULTADO_INFO.sin_problema;
@@ -850,6 +894,9 @@
         <div class="atb-field" style="grid-column: span 2;"><label for="atb-viaje-nota">Nota (opcional)</label><input type="text" id="atb-viaje-nota" placeholder="ej. me emboscaron cerca de la salida de Caerleon"></div>
         <button class="atb-btn" id="atb-viaje-add">Registrar viaje</button>
       </div>
+
+      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:18px 0 8px;">Guía rápida de monturas</p>
+      ${mountRefHtml}
 
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:18px 0 8px;">Resumen por ruta y montura</p>
       ${resumenHtml}
@@ -1232,6 +1279,14 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
 
 
 
