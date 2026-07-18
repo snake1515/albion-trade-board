@@ -582,6 +582,36 @@ def api_compras_delete(compra_id):
     return jsonify({"deleted": True})
 
 
+@app.route("/api/viajes", methods=["GET", "POST"])
+def api_viajes():
+    if request.method == "POST":
+        body = request.get_json()
+        origin = CITIES_BY_ID.get(body["origin"])
+        dest = CITIES_BY_ID.get(body["dest"])
+        if not origin or not dest:
+            return jsonify({"error": "ciudad no reconocida"}), 400
+        nuevo = {
+            "origin": origin["id"],
+            "origin_name": origin["name"],
+            "dest": dest["id"],
+            "dest_name": dest["name"],
+            "montura": body["montura"],
+            "incidente": bool(body.get("incidente", False)),
+            "resultado": body.get("resultado") or None,
+            "nota": body.get("nota") or None,
+        }
+        res = supabase.table("viajes_transporte").insert(nuevo).execute()
+        return jsonify(res.data), 201
+    res = supabase.table("viajes_transporte").select("*").order("fecha_creacion", desc=True).execute()
+    return jsonify(res.data)
+
+
+@app.route("/api/viajes/<int:viaje_id>", methods=["DELETE"])
+def api_viajes_delete(viaje_id):
+    supabase.table("viajes_transporte").delete().eq("id", viaje_id).execute()
+    return jsonify({"deleted": True})
+
+
 @app.route("/api/perfil", methods=["GET", "POST"])
 def api_perfil():
     if request.method == "POST":
@@ -618,6 +648,20 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
