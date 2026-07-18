@@ -146,6 +146,10 @@
         <input type="number" id="atb-maxstale" value="12" min="1" step="1">
       </div>
       <div class="atb-field">
+        <label for="atb-mount-cap">Capacidad de tu montura (kg)</label>
+        <input type="number" id="atb-mount-cap" value="700" min="1" step="10">
+      </div>
+      <div class="atb-field">
         <button class="atb-btn" id="atb-refresh">Traer últimos precios</button>
       </div>
       <div class="atb-field">
@@ -159,6 +163,18 @@
       Riesgo relativo por ciudad
     </label>
     <div class="atb-risk-grid" id="atb-risk-grid"></div>
+  </div>
+
+  <div class="atb-panel">
+    <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; display:block; margin-bottom:6px;">
+      Distancias entre ciudades (minutos, viaje de ida)
+    </label>
+    <p style="font-size:11px; color:var(--text-muted); margin:0 0 10px;">
+      Mide una vez en el juego el tiempo aproximado de cada ruta y guárdalo aquí.
+      No lo calculamos automáticamente porque el trazado de rutas puede cambiar con
+      actualizaciones del mapa — mejor un dato tuyo real que uno adivinado.
+    </p>
+    <div class="atb-risk-grid" id="atb-distance-grid"></div>
   </div>
 
   <div class="atb-tabs">
@@ -199,8 +215,40 @@
   let lastRawData = [];
   let riskValues = {};
   let config = {};
+  let distancias = {};
   let selectedHistoryItem = null;
   let selectedWeapon = null;
+
+  function distanceKey(cityAId, cityBId) {
+    return [cityAId, cityBId].sort().join('|');
+  }
+
+  function buildDistanceGrid() {
+    const gridEl = document.getElementById('atb-distance-grid');
+    gridEl.innerHTML = '';
+    for (let i = 0; i < CITIES.length; i++) {
+      for (let j = i + 1; j < CITIES.length; j++) {
+        const a = CITIES[i], b = CITIES[j];
+        const key = distanceKey(a.id, b.id);
+        const val = distancias[key] ?? '';
+        const row = document.createElement('div');
+        row.className = 'atb-risk-item';
+        row.innerHTML = `
+          <span style="font-size:11px;">${a.name}<span class="arrow" style="color:var(--gold); margin:0 4px;">↔</span>${b.name}</span>
+          <input type="number" min="0" step="1" placeholder="min" style="width:60px; background:var(--panel-raised); border:1px solid var(--hairline); color:var(--text); padding:4px 6px; border-radius:4px; font-family:'IBM Plex Mono',monospace; font-size:12px;" value="${val}" data-key="${key}">
+        `;
+        gridEl.appendChild(row);
+      }
+    }
+    gridEl.querySelectorAll('input[type=number]').forEach(inp => {
+      inp.addEventListener('change', e => {
+        const v = Number(e.target.value);
+        if (v > 0) distancias[e.target.dataset.key] = v;
+        else delete distancias[e.target.dataset.key];
+        if (lastRows.length) render();
+      });
+    });
+  }
 
   function riskColor(risk) {
     if (risk >= 60) return '#b23a3a';
@@ -253,11 +301,14 @@
     const res = await fetch('/api/config');
     config = await res.json();
     riskValues = config.riesgo_ciudades || {};
+    distancias = config.distancias_ciudades || {};
     document.getElementById('atb-server').value = config.servidor || 'west';
     document.getElementById('atb-tax').value = config.impuesto ?? 4;
     document.getElementById('atb-minmargin').value = config.margen_minimo ?? 200;
     document.getElementById('atb-maxstale').value = config.max_antiguedad_horas ?? 12;
+    document.getElementById('atb-mount-cap').value = config.capacidad_montura_kg || 700;
     buildRiskGrid();
+    buildDistanceGrid();
   }
 
   document.getElementById('atb-save-config').addEventListener('click', async () => {
@@ -272,6 +323,8 @@
         margen_minimo: Number(document.getElementById('atb-minmargin').value),
         max_antiguedad_horas: Number(document.getElementById('atb-maxstale').value),
         riesgo_ciudades: riskValues,
+        capacidad_montura_kg: Number(document.getElementById('atb-mount-cap').value),
+        distancias_ciudades: distancias,
       }),
     });
     btn.textContent = 'Guardar configuración';
@@ -346,7 +399,15 @@
     const marginPct = (margin / row.buyPrice) * 100;
     const avgRisk = ((riskValues[row.origin.id] ?? 30) + (riskValues[row.dest.id] ?? 30)) / 2;
     const riskAdjScore = margin * (1 - avgRisk / 150);
-    return { margin, marginPct, avgRisk, riskAdjScore };
+
+    const capacidadKg = Number(document.getElementById('atb-mount-cap').value) || 0;
+    const pesoItem = row.item.peso || 1;
+    const unidadesOptimas = pesoItem > 0 ? Math.floor(capacidadKg / pesoItem) : 0;
+    const gananciaViaje = margin * unidadesOptimas;
+    const tiempoMin = distancias[distanceKey(row.origin.id, row.dest.id)] || null;
+    const platasHora = tiempoMin ? Math.round(gananciaViaje / (tiempoMin / 60)) : null;
+
+    return { margin, marginPct, avgRisk, riskAdjScore, unidadesOptimas, gananciaViaje, tiempoMin, platasHora };
   }
 
   function render() {
@@ -737,7 +798,7 @@
     }
     let extraCol = activeTab === 'routes' ? '<th>Items rentables</th>' : '<th>Tier</th>';
     let html = `<table class="atb-table"><thead><tr>
-      <th>Item</th><th>Ruta</th>${extraCol}<th>Compra</th><th>Venta</th><th>Margen</th><th>Margen %</th><th>Riesgo</th><th>Puntaje</th>
+      <th>Item</th><th>Ruta</th>${extraCol}<th>Compra</th><th>Venta</th><th>Margen</th><th>Margen %</th><th>Riesgo</th><th>Puntaje</th><th>Unid. óptimas</th><th>Ganancia viaje</th><th>Plata/hora</th>
     </tr></thead><tbody>`;
     list.slice(0, 40).forEach(r => {
       const staleWarn = r.ageHours > 6 ? `<span class="atb-stale">●</span>` : '';
@@ -752,6 +813,9 @@
         <td class="${r.marginPct >= 0 ? 'atb-profit-pos' : 'atb-profit-neg'}">${r.marginPct.toFixed(1)}%</td>
         <td><span class="atb-seal" style="background:${riskColor(r.avgRisk)}"></span>${Math.round(r.avgRisk)}</td>
         <td>${Math.round(r.riskAdjScore).toLocaleString('es-CO')}</td>
+        <td>${r.unidadesOptimas.toLocaleString('es-CO')}</td>
+        <td class="${r.gananciaViaje >= 0 ? 'atb-profit-pos' : 'atb-profit-neg'}">${Math.round(r.gananciaViaje).toLocaleString('es-CO')}</td>
+        <td>${r.platasHora ? Math.round(r.platasHora).toLocaleString('es-CO') + '/h' : '—'}</td>
       </tr>`;
     });
     html += '</tbody></table>';
@@ -863,6 +927,10 @@
 </script>
 </body>
 </html>
+
+
+
+
 
 
 
