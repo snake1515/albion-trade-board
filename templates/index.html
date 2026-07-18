@@ -206,6 +206,7 @@
     <button class="atb-tab" data-tab="spread">Spread</button>
     <button class="atb-tab" data-tab="orders">Seguimiento</button>
     <button class="atb-tab" data-tab="compras">Mis compras</button>
+    <button class="atb-tab" data-tab="viajes">Viajes</button>
     <button class="atb-tab" data-tab="history">Historial</button>
     <button class="atb-tab" data-tab="events">Eventos</button>
     <button class="atb-tab" data-tab="builds">Builds de farmeo</button>
@@ -513,6 +514,7 @@
     if (activeTab === 'spread') { renderSpread(); return; }
     if (activeTab === 'orders') { renderOrders(); return; }
     if (activeTab === 'compras') { renderCompras(); return; }
+    if (activeTab === 'viajes') { renderViajes(); return; }
     if (activeTab === 'builds') { renderBuilds(); return; }
     if (!lastRows.length) {
       contentEl.innerHTML = '<div class="atb-empty">Todavía no hay precios guardados. Dale clic a "Traer últimos precios" para la primera carga (el cron automático corre cada hora).</div>';
@@ -780,6 +782,105 @@
       btn.addEventListener('click', async () => {
         await fetch('/api/compras/' + btn.dataset.id, { method: 'DELETE' });
         renderCompras();
+      });
+    });
+  }
+
+  const RESULTADO_INFO = {
+    sin_problema: { label: 'Sin problema', incidente: false, cls: 'atb-profit-pos' },
+    escape: { label: 'Encontré enemigos, escapé', incidente: true, cls: '', color: '#e0a53a' },
+    perdi_carga: { label: 'Perdí la carga', incidente: true, cls: 'atb-profit-neg' },
+    muerte: { label: 'Morí', incidente: true, cls: 'atb-profit-neg' },
+  };
+
+  async function renderViajes() {
+    contentEl.innerHTML = '<div class="atb-empty">Cargando viajes...</div>';
+    const res = await fetch('/api/viajes');
+    const viajes = await res.json();
+
+    const cityOptions = CITIES.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    const monturaOptions = ['Buey', 'Mamut', 'Ciervo Gigante', 'Alce', 'Caballo', 'Otro']
+      .map(m => `<option value="${m}">${m}</option>`).join('');
+    const resultadoOptions = Object.entries(RESULTADO_INFO)
+      .map(([key, r]) => `<option value="${key}">${r.label}</option>`).join('');
+
+    // Resumen agrupado por ruta + montura, para ver qué tan seguido hay problemas
+    const grupos = {};
+    viajes.forEach(v => {
+      const key = `${v.origin_name} → ${v.dest_name}|${v.montura}`;
+      grupos[key] = grupos[key] || { ruta: `${v.origin_name} → ${v.dest_name}`, montura: v.montura, total: 0, incidentes: 0 };
+      grupos[key].total++;
+      if (v.incidente) grupos[key].incidentes++;
+    });
+    const resumenRows = Object.values(grupos).sort((a, b) => (b.incidentes / b.total) - (a.incidentes / a.total));
+
+    let resumenHtml = '<div class="atb-empty">Todavía no hay viajes registrados.</div>';
+    if (resumenRows.length) {
+      resumenHtml = `<table class="atb-table"><thead><tr><th>Ruta</th><th>Montura</th><th>Viajes</th><th>Incidentes</th><th>% con riesgo</th></tr></thead><tbody>`;
+      resumenRows.forEach(r => {
+        const pct = (r.incidentes / r.total) * 100;
+        const cls = pct >= 40 ? 'atb-profit-neg' : (pct > 0 ? '' : 'atb-profit-pos');
+        resumenHtml += `<tr><td class="atb-item-name">${r.ruta}</td><td>${r.montura}</td><td>${r.total}</td><td>${r.incidentes}</td><td class="${cls}">${pct.toFixed(0)}%</td></tr>`;
+      });
+      resumenHtml += '</tbody></table>';
+    }
+
+    function rowFor(v) {
+      const info = RESULTADO_INFO[v.resultado] || RESULTADO_INFO.sin_problema;
+      const fecha = new Date(v.fecha_creacion).toLocaleDateString('es-CO');
+      return `
+        <tr>
+          <td>${fecha}</td>
+          <td class="atb-item-name">${v.origin_name} <span style="color:var(--gold); margin:0 4px;">→</span> ${v.dest_name}</td>
+          <td>${v.montura}</td>
+          <td class="${info.cls}" style="${info.color ? `color:${info.color};` : ''}">${info.label}</td>
+          <td style="font-size:11px; color:var(--text-muted);">${v.nota || ''}</td>
+          <td><button class="atb-event-del atb-viaje-del" data-id="${v.id}">Borrar</button></td>
+        </tr>`;
+    }
+
+    contentEl.innerHTML = `
+      <div class="atb-tip"><strong>Tip:</strong> registra cada viaje importante, tenga o no problemas — los viajes "sin problema" también cuentan para calcular el % de riesgo real de una ruta. Con el tiempo esto te dice si vale la pena arriesgar el mamut en cierta ruta o si mejor te cambias a algo más rápido.</div>
+
+      <div class="atb-event-form">
+        <div class="atb-field"><label for="atb-viaje-origin">Ciudad origen</label><select id="atb-viaje-origin">${cityOptions}</select></div>
+        <div class="atb-field"><label for="atb-viaje-dest">Ciudad destino</label><select id="atb-viaje-dest">${cityOptions}</select></div>
+        <div class="atb-field"><label for="atb-viaje-montura">Montura</label><select id="atb-viaje-montura">${monturaOptions}</select></div>
+        <div class="atb-field" style="grid-column: span 2;"><label for="atb-viaje-resultado">Qué pasó</label><select id="atb-viaje-resultado">${resultadoOptions}</select></div>
+        <div class="atb-field" style="grid-column: span 2;"><label for="atb-viaje-nota">Nota (opcional)</label><input type="text" id="atb-viaje-nota" placeholder="ej. me emboscaron cerca de la salida de Caerleon"></div>
+        <button class="atb-btn" id="atb-viaje-add">Registrar viaje</button>
+      </div>
+
+      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:18px 0 8px;">Resumen por ruta y montura</p>
+      ${resumenHtml}
+
+      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:18px 0 8px;">Historial de viajes (${viajes.length})</p>
+      <table class="atb-table"><thead><tr><th>Fecha</th><th>Ruta</th><th>Montura</th><th>Resultado</th><th>Nota</th><th></th></tr></thead>
+      <tbody>${viajes.map(rowFor).join('') || '<tr><td colspan="6" class="atb-empty">Sin viajes registrados todavía.</td></tr>'}</tbody></table>
+    `;
+
+    document.getElementById('atb-viaje-add').addEventListener('click', async () => {
+      const resultado = document.getElementById('atb-viaje-resultado').value;
+      const info = RESULTADO_INFO[resultado];
+      await fetch('/api/viajes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          origin: document.getElementById('atb-viaje-origin').value,
+          dest: document.getElementById('atb-viaje-dest').value,
+          montura: document.getElementById('atb-viaje-montura').value,
+          incidente: info.incidente,
+          resultado,
+          nota: document.getElementById('atb-viaje-nota').value.trim(),
+        }),
+      });
+      renderViajes();
+    });
+
+    contentEl.querySelectorAll('.atb-viaje-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch('/api/viajes/' + btn.dataset.id, { method: 'DELETE' });
+        renderViajes();
       });
     });
   }
@@ -1131,6 +1232,13 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
 
 
 
