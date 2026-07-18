@@ -39,6 +39,8 @@
     padding: 8px 10px; border-radius: 4px; font-family: 'IBM Plex Mono', monospace; font-size: 13px;
   }
   .atb-field select:focus, .atb-field input:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+  .atb-field-hint { display: block; font-size: 10.5px; color: var(--text-muted); margin-top: 5px; line-height: 1.4; }
+  .atb-field-hint.atb-hint-warn { color: var(--gold); }
 
   .atb-btn { background: var(--gold); color: #1a1206; border: none; padding: 10px 18px; border-radius: 4px; font-family: 'Inter', sans-serif; font-weight: 700; font-size: 13px; cursor: pointer; letter-spacing: 0.3px; transition: background 0.15s ease; }
   .atb-btn:hover { background: var(--gold-bright); }
@@ -159,6 +161,7 @@
       <div class="atb-field">
         <label for="atb-maxstale">Antigüedad máx. del dato (horas)</label>
         <input type="number" id="atb-maxstale" value="12" min="1" step="1">
+        <span class="atb-field-hint" id="atb-stale-hint">Trae los precios para ver la antigüedad real de tus datos.</span>
       </div>
       <div class="atb-field">
         <label for="atb-mount-cap">Capacidad de tu montura (kg)</label>
@@ -416,7 +419,33 @@
     const data = await res.json();
     lastRawData = data;
     processData(data);
+    updateStaleHint(data);
     statusEl.textContent = `${data.length} registros guardados · ${new Date().toLocaleTimeString('es-CO')}`;
+  }
+
+  function updateStaleHint(data) {
+    const hintEl = document.getElementById('atb-stale-hint');
+    if (!hintEl) return;
+    const now = Date.now();
+    let minAge = null, maxAge = null;
+    data.forEach(rec => {
+      [rec.sell_price_min_date, rec.buy_price_max_date].forEach(d => {
+        if (!d) return;
+        const age = (now - new Date(d).getTime()) / 3600000;
+        if (!Number.isFinite(age) || age < 0) return;
+        if (minAge === null || age < minAge) minAge = age;
+        if (maxAge === null || age > maxAge) maxAge = age;
+      });
+    });
+    if (minAge === null) {
+      hintEl.textContent = 'Sin datos con fecha todavía — trae los últimos precios primero.';
+      hintEl.classList.remove('atb-hint-warn');
+      return;
+    }
+    const fmt = h => (h < 1 ? `${Math.round(h * 60)} min` : `${h.toFixed(1)} h`);
+    hintEl.textContent = `Tus datos van de ${fmt(minAge)} (el más fresco) a ${fmt(maxAge)} (el más viejo) de antigüedad.`;
+    const maxStaleField = Number(document.getElementById('atb-maxstale').value) || 0;
+    hintEl.classList.toggle('atb-hint-warn', maxStaleField < minAge);
   }
 
   function processData(data) {
@@ -981,7 +1010,10 @@
   document.getElementById('atb-refresh').addEventListener('click', fetchPrices);
   document.getElementById('atb-tax').addEventListener('change', render);
   document.getElementById('atb-minmargin').addEventListener('change', render);
-  document.getElementById('atb-maxstale').addEventListener('change', render);
+  document.getElementById('atb-maxstale').addEventListener('change', () => {
+    if (lastRawData.length) updateStaleHint(lastRawData);
+    render();
+  });
 
   (async function init() {
     await loadConfig();
@@ -991,6 +1023,13 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
 
 
 
