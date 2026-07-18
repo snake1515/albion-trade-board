@@ -85,6 +85,18 @@
   .atb-event-del { background: none; border: 1px solid var(--hairline); color: var(--text-muted); border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; flex-shrink: 0; }
   .atb-event-del:hover { border-color: var(--red); color: var(--red); }
 
+  .atb-tip {
+    font-size: 11.5px; color: var(--text-muted); line-height: 1.5;
+    border-left: 2px solid var(--teal); padding: 8px 12px;
+    background: var(--panel-raised); border-radius: 0 4px 4px 0; margin-bottom: 16px;
+  }
+  .atb-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 22px; }
+  .atb-summary-card { background: var(--panel-raised); border: 1px solid var(--hairline); border-radius: 6px; padding: 16px; }
+  .atb-summary-card h3 { font-family: 'Cinzel', serif; font-weight: 700; font-size: 15px; color: var(--gold-bright); margin: 0 0 10px; }
+  .atb-summary-value { font-family: 'IBM Plex Mono', monospace; font-size: 21px; color: #7fc9a3; margin-bottom: 6px; }
+  .atb-summary-sub { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 10px; }
+  .atb-summary-tip { font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--hairline); padding-top: 8px; margin-top: 8px; line-height: 1.5; }
+
   @media (max-width: 700px) { .atb-event-form { grid-template-columns: 1fr 1fr; } }
 </style>
 </head>
@@ -138,10 +150,14 @@
   </div>
 
   <div class="atb-tabs">
-    <button class="atb-tab active" data-tab="items">Por item</button>
+    <button class="atb-tab active" data-tab="resumen">Resumen</button>
+    <button class="atb-tab" data-tab="items">Por item</button>
     <button class="atb-tab" data-tab="routes">Por ruta</button>
+    <button class="atb-tab" data-tab="spread">Spread</button>
+    <button class="atb-tab" data-tab="orders">Seguimiento</button>
     <button class="atb-tab" data-tab="history">Historial</button>
     <button class="atb-tab" data-tab="events">Eventos</button>
+    <button class="atb-tab" data-tab="builds">Builds de farmeo</button>
   </div>
 
   <div class="atb-panel">
@@ -160,12 +176,14 @@
 (function() {
   const ITEMS = {{ items_json | safe }};
   const CITIES = {{ cities_json | safe }};
+  const WEAPONS = {{ weapons_json | safe }};
 
   const statusEl = document.getElementById('atb-status');
   const contentEl = document.getElementById('atb-content');
   const riskGridEl = document.getElementById('atb-risk-grid');
-  let activeTab = 'items';
+  let activeTab = 'resumen';
   let lastRows = [];
+  let lastRawData = [];
   let riskValues = {};
   let config = {};
   let selectedHistoryItem = null;
@@ -255,6 +273,7 @@
   async function loadPrices() {
     const res = await fetch('/api/precios');
     const data = await res.json();
+    lastRawData = data;
     processData(data);
     statusEl.textContent = `${data.length} registros guardados · ${new Date().toLocaleTimeString('es-CO')}`;
   }
@@ -307,8 +326,12 @@
   }
 
   function render() {
+    if (activeTab === 'resumen') { renderResumen(); return; }
     if (activeTab === 'history') { renderHistory(); return; }
     if (activeTab === 'events') { renderEvents(); return; }
+    if (activeTab === 'spread') { renderSpread(); return; }
+    if (activeTab === 'orders') { renderOrders(); return; }
+    if (activeTab === 'builds') { renderBuilds(); return; }
     if (!lastRows.length) {
       contentEl.innerHTML = '<div class="atb-empty">Todavía no hay precios guardados. Dale clic a "Traer últimos precios" para la primera carga (el cron automático corre cada hora).</div>';
       return;
@@ -343,9 +366,302 @@
     }
   }
 
+  function renderSpread() {
+    const maxStale = Number(document.getElementById('atb-maxstale').value);
+    const now = Date.now();
+
+    const rows = [];
+    lastRawData.forEach(rec => {
+      const item = ITEMS.find(i => i.id === rec.item_id);
+      const city = CITIES.find(c => c.id === rec.city);
+      if (!item || !city) return;
+      if (!rec.sell_price_min || !rec.buy_price_max || rec.sell_price_min <= 0) return;
+
+      const date = rec.sell_price_min_date ? new Date(rec.sell_price_min_date).getTime() : 0;
+      const ageHours = date ? (now - date) / 3600000 : 999;
+      if (ageHours > maxStale) return;
+
+      const spread = rec.sell_price_min - rec.buy_price_max;
+      const spreadPct = (spread / rec.sell_price_min) * 100;
+      rows.push({ item, city, ask: rec.sell_price_min, bid: rec.buy_price_max, spread, spreadPct, ageHours });
+    });
+
+    rows.sort((a, b) => b.spreadPct - a.spreadPct);
+
+    if (!rows.length) {
+      contentEl.innerHTML = '<div class="atb-tip"><strong>Tip:</strong> pon tu orden un poco por debajo del precio de compra actual (undercut mínimo) en vez de vender instantáneo — el spread es tu margen de maniobra, no una ganancia garantizada.</div><div class="atb-empty">No hay datos suficientes todavía, o el filtro de antigüedad es muy estricto.</div>';
+      return;
+    }
+
+    let html = `<table class="atb-table"><thead><tr>
+      <th>Item</th><th>Ciudad</th><th>Precio compra (ask)</th><th>Precio venta rápida (bid)</th><th>Spread</th><th>Spread %</th>
+    </tr></thead><tbody>`;
+    rows.slice(0, 40).forEach(r => {
+      const staleWarn = r.ageHours > 6 ? `<span class="atb-stale">●</span>` : '';
+      html += `<tr>
+        <td class="atb-item-name">${r.item.name}${staleWarn}</td>
+        <td class="atb-route">${r.city.name}</td>
+        <td>${Math.round(r.ask).toLocaleString('es-CO')}</td>
+        <td>${Math.round(r.bid).toLocaleString('es-CO')}</td>
+        <td class="${r.spread >= 0 ? 'atb-profit-pos' : 'atb-profit-neg'}">${Math.round(r.spread).toLocaleString('es-CO')}</td>
+        <td class="${r.spreadPct >= 0 ? 'atb-profit-pos' : 'atb-profit-neg'}">${r.spreadPct.toFixed(1)}%</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    html += `<p style="font-size:11px; color:var(--text-muted); margin-top:12px;">
+      Esto es el colchón de precio dentro de una sola ciudad (comprar y poner tu propia orden de venta un poco más barata que el precio actual).
+      No indica qué tan rápido se vendería — para eso usa la pestaña "Seguimiento".
+    </p>`;
+    contentEl.innerHTML = '<div class="atb-tip"><strong>Tip:</strong> undercut mínimo (1-2 plata menos que el precio actual) suele venderse más rápido que undercuts grandes — no regales margen de golpe.</div>' + html;
+  }
+
+  async function renderOrders() {
+    contentEl.innerHTML = '<div class="atb-empty">Cargando órdenes...</div>';
+    const res = await fetch('/api/ordenes');
+    const ordenes = await res.json();
+
+    const itemOptions = ITEMS.map(i => `<option value="${i.id}">${i.name}</option>`).join('');
+    const cityOptions = CITIES.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+
+    const activas = ordenes.filter(o => !o.fecha_completada);
+    const completadas = ordenes.filter(o => o.fecha_completada);
+
+    function rowFor(o, activa) {
+      const duracion = activa
+        ? ((Date.now() - new Date(o.fecha_creacion).getTime()) / 3600000).toFixed(1) + 'h (en curso)'
+        : Number(o.duracion_horas).toFixed(1) + 'h';
+      return `
+        <tr>
+          <td class="atb-item-name">${o.item_name}</td>
+          <td class="atb-route">${o.city}</td>
+          <td>${o.tipo}</td>
+          <td>${Math.round(o.precio).toLocaleString('es-CO')}</td>
+          <td>${o.cantidad}</td>
+          <td>${duracion}</td>
+          <td>
+            ${activa ? `<button class="atb-btn atb-complete-btn" style="padding:5px 10px; font-size:11px;" data-id="${o.id}">Marcar completada</button>` : ''}
+            <button class="atb-event-del atb-order-del" data-id="${o.id}">Borrar</button>
+          </td>
+        </tr>`;
+    }
+
+    contentEl.innerHTML = `
+      <div class="atb-tip"><strong>Tip:</strong> registra la orden apenas la pongas en el juego, no después — así la duración calculada es real. Con unas semanas de datos vas a notar qué items rotan rápido y cuáles se quedan pegados días.</div>
+      <div class="atb-event-form">
+        <div class="atb-field"><label for="atb-ord-item">Item</label><select id="atb-ord-item">${itemOptions}</select></div>
+        <div class="atb-field"><label for="atb-ord-city">Ciudad</label><select id="atb-ord-city">${cityOptions}</select></div>
+        <div class="atb-field"><label for="atb-ord-tipo">Tipo</label>
+          <select id="atb-ord-tipo"><option value="venta">Orden de venta</option><option value="compra">Orden de compra</option></select>
+        </div>
+        <div class="atb-field"><label for="atb-ord-precio">Precio</label><input type="number" id="atb-ord-precio" min="0"></div>
+        <button class="atb-btn" id="atb-ord-add">Agregar</button>
+        <div class="atb-field" style="grid-column: 1 / 2;"><label for="atb-ord-cantidad">Cantidad</label><input type="number" id="atb-ord-cantidad" value="1" min="1"></div>
+      </div>
+
+      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">Activas (${activas.length})</p>
+      <table class="atb-table"><thead><tr><th>Item</th><th>Ciudad</th><th>Tipo</th><th>Precio</th><th>Cant.</th><th>Tiempo</th><th></th></tr></thead>
+      <tbody>${activas.map(o => rowFor(o, true)).join('') || '<tr><td colspan="7" class="atb-empty">Sin órdenes activas.</td></tr>'}</tbody></table>
+
+      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:18px 0 8px;">Completadas (${completadas.length})</p>
+      <table class="atb-table"><thead><tr><th>Item</th><th>Ciudad</th><th>Tipo</th><th>Precio</th><th>Cant.</th><th>Duración</th><th></th></tr></thead>
+      <tbody>${completadas.map(o => rowFor(o, false)).join('') || '<tr><td colspan="7" class="atb-empty">Todavía ninguna completada.</td></tr>'}</tbody></table>
+    `;
+
+    document.getElementById('atb-ord-add').addEventListener('click', async () => {
+      const precio = Number(document.getElementById('atb-ord-precio').value);
+      if (!precio) return;
+      await fetch('/api/ordenes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_id: document.getElementById('atb-ord-item').value,
+          city: document.getElementById('atb-ord-city').value,
+          tipo: document.getElementById('atb-ord-tipo').value,
+          precio,
+          cantidad: Number(document.getElementById('atb-ord-cantidad').value) || 1,
+        }),
+      });
+      renderOrders();
+    });
+
+    contentEl.querySelectorAll('.atb-complete-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch('/api/ordenes/' + btn.dataset.id + '/completar', { method: 'POST' });
+        renderOrders();
+      });
+    });
+    contentEl.querySelectorAll('.atb-order-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch('/api/ordenes/' + btn.dataset.id, { method: 'DELETE' });
+        renderOrders();
+      });
+    });
+  }
+
+  async function renderBuilds() {
+    contentEl.innerHTML = '<div class="atb-empty">Cargando perfil y builds...</div>';
+    const [perfilRes, buildsRes] = await Promise.all([fetch('/api/perfil'), fetch('/api/builds')]);
+    const perfil = await perfilRes.json();
+    const builds = await buildsRes.json();
+    const maestrias = perfil.maestria_armas || {};
+
+    const weaponInputs = WEAPONS.map(w => `
+      <div class="atb-field">
+        <label for="atb-mst-${w}">${w}</label>
+        <input type="number" id="atb-mst-${w}" min="0" max="120" value="${maestrias[w] ?? 0}">
+      </div>`).join('');
+
+    const tierColor = { S: 'var(--gold-bright)', A: 'var(--teal)', B: 'var(--text-muted)' };
+    const riesgoColor = { alto: 'var(--red)', 'muy alto': 'var(--red)', medio: 'var(--gold)', bajo: 'var(--teal)' };
+
+    const buildCards = builds.map(b => {
+      const cumpleIP = (perfil.ip_actual || 0) >= b.ip_minimo;
+      const faltaIP = b.ip_minimo - (perfil.ip_actual || 0);
+      return `
+        <div class="atb-event-card" style="border-left-color:${tierColor[b.tier] || 'var(--gold)'};">
+          <div>
+            <div class="atb-event-meta">${b.zona} · Tier ${b.tier} · Riesgo <span style="color:${riesgoColor[b.riesgo] || 'var(--text-muted)'}">${b.riesgo}</span></div>
+            <div class="atb-event-title">${b.arma}${b.offhand ? ' + ' + b.offhand : ''}</div>
+            <div class="atb-event-notes">
+              Armadura: ${b.armadura} · IP mínimo: ${b.ip_minimo} ·
+              ${b.plata_hora_min ? `${b.plata_hora_min.toLocaleString('es-CO')}–${b.plata_hora_max.toLocaleString('es-CO')} plata/hora (estimado)` : ''}
+              <br>${b.notas || ''}
+              <br><strong style="color:${cumpleIP ? '#7fc9a3' : '#d97a7a'}">
+                ${cumpleIP ? '✓ Ya cumples el IP mínimo' : `✗ Te faltan ${faltaIP} de IP`}
+              </strong>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+
+    contentEl.innerHTML = `
+      <div class="atb-tip"><strong>Tip:</strong> la app no puede darte la ubicación de un portal de Mist o mazmorra — se generan al azar y los encuentras explorando tu zona. Si entras a una mazmorra solo, espera ~90 segundos antes de moverte para que el portal se cierre y nadie más pueda invadirte.</div>
+      <div class="atb-controls-grid" style="margin-bottom:18px;">
+        <div class="atb-field"><label for="atb-perfil-ip">Tu IP actual</label><input type="number" id="atb-perfil-ip" value="${perfil.ip_actual ?? 1200}"></div>
+        <div class="atb-field"><label for="atb-perfil-armadura">Especialización de armadura</label>
+          <select id="atb-perfil-armadura">
+            <option value="placa" ${perfil.especializacion_armadura === 'placa' ? 'selected' : ''}>Placa</option>
+            <option value="cuero" ${perfil.especializacion_armadura === 'cuero' ? 'selected' : ''}>Cuero</option>
+            <option value="tela" ${perfil.especializacion_armadura === 'tela' ? 'selected' : ''}>Tela</option>
+          </select>
+        </div>
+        <button class="atb-btn" id="atb-perfil-save">Guardar perfil</button>
+      </div>
+
+      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">Maestría por arma</p>
+      <div class="atb-risk-grid" style="margin-bottom:22px;">${weaponInputs}</div>
+
+      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">Catálogo de builds (curado de guías de la comunidad, no cálculo exacto)</p>
+      <div class="atb-timeline">${buildCards || '<div class="atb-empty">Sin builds en el catálogo todavía.</div>'}</div>
+
+      <p style="font-size:11px; color:var(--text-muted); margin-top:14px; line-height:1.5;">
+        Los rangos de plata/hora y tiers vienen de guías y tier lists públicas de la comunidad (mid-2026), no de un cálculo exacto de tu personaje —
+        el meta cambia con cada parche de balance, así que trátalo como punto de partida, no como verdad absoluta.
+      </p>
+    `;
+
+    document.getElementById('atb-perfil-save').addEventListener('click', async () => {
+      const maestria_armas = {};
+      WEAPONS.forEach(w => { maestria_armas[w] = Number(document.getElementById('atb-mst-' + w).value) || 0; });
+      await fetch('/api/perfil', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ip_actual: Number(document.getElementById('atb-perfil-ip').value),
+          especializacion_armadura: document.getElementById('atb-perfil-armadura').value,
+          maestria_armas,
+        }),
+      });
+      renderBuilds();
+    });
+  }
+
+  async function renderResumen() {
+    contentEl.innerHTML = '<div class="atb-empty">Comparando los 3 métodos...</div>';
+    const maxStale = Number(document.getElementById('atb-maxstale').value);
+    const minMargin = Number(document.getElementById('atb-minmargin').value);
+    const now = Date.now();
+
+    // 1. Mejor ruta de flip (compra/transporte/venta)
+    let mejorRuta = null;
+    if (lastRows.length) {
+      const enriched = lastRows
+        .filter(r => r.ageHours <= maxStale)
+        .map(r => ({ ...r, ...computeMargin(r) }))
+        .filter(r => r.margin >= minMargin);
+      if (enriched.length) mejorRuta = enriched.sort((a, b) => b.riskAdjScore - a.riskAdjScore)[0];
+    }
+
+    // 2. Mejor spread (órdenes en la misma ciudad)
+    let mejorSpread = null;
+    lastRawData.forEach(rec => {
+      const item = ITEMS.find(i => i.id === rec.item_id);
+      const city = CITIES.find(c => c.id === rec.city);
+      if (!item || !city || !rec.sell_price_min || !rec.buy_price_max || rec.sell_price_min <= 0) return;
+      const date = rec.sell_price_min_date ? new Date(rec.sell_price_min_date).getTime() : 0;
+      const ageHours = date ? (now - date) / 3600000 : 999;
+      if (ageHours > maxStale) return;
+      const spread = rec.sell_price_min - rec.buy_price_max;
+      const spreadPct = (spread / rec.sell_price_min) * 100;
+      if (!mejorSpread || spreadPct > mejorSpread.spreadPct) {
+        mejorSpread = { item, city, spread, spreadPct };
+      }
+    });
+
+    // 3. Mejor build de farmeo disponible según tu perfil
+    const [perfilRes, buildsRes] = await Promise.all([fetch('/api/perfil'), fetch('/api/builds')]);
+    const perfil = await perfilRes.json();
+    const builds = await buildsRes.json();
+    const califican = builds.filter(b => (perfil.ip_actual || 0) >= b.ip_minimo).sort((a, b) => (b.plata_hora_max || 0) - (a.plata_hora_max || 0));
+    const mejorBuild = califican[0] || null;
+    const siguienteBuild = !mejorBuild ? builds.sort((a, b) => a.ip_minimo - b.ip_minimo)[0] : null;
+
+    contentEl.innerHTML = `
+      <div class="atb-summary-grid">
+        <div class="atb-summary-card">
+          <h3>1. Comprar, transportar, vender</h3>
+          ${mejorRuta ? `
+            <div class="atb-summary-value">${Math.round(mejorRuta.margin).toLocaleString('es-CO')} plata</div>
+            <div class="atb-summary-sub">${mejorRuta.item.name}: ${mejorRuta.origin.name} → ${mejorRuta.dest.name} (${mejorRuta.marginPct.toFixed(1)}%)</div>
+          ` : `<div class="atb-summary-sub">Sin rutas rentables con los filtros actuales.</div>`}
+          <div class="atb-summary-tip"><strong>Tip:</strong> revisa la antigüedad del dato antes de moverte — un margen visto hace más de 6-8 horas puede ya no existir. Evita rutas que crucen Caerleon si vas cargado y no quieres arriesgar.</div>
+        </div>
+
+        <div class="atb-summary-card">
+          <h3>2. Órdenes (flipping en la misma ciudad)</h3>
+          ${mejorSpread ? `
+            <div class="atb-summary-value">${mejorSpread.spreadPct.toFixed(1)}%</div>
+            <div class="atb-summary-sub">${mejorSpread.item.name} en ${mejorSpread.city.name} — colchón de ${Math.round(mejorSpread.spread).toLocaleString('es-CO')} plata</div>
+          ` : `<div class="atb-summary-sub">Sin datos suficientes todavía.</div>`}
+          <div class="atb-summary-tip"><strong>Tip:</strong> pon tu orden de venta apenas por debajo del precio actual (undercut mínimo) en vez de vender instantáneo — ganas más, pero no sabes cuánto tardará en llenarse. No es rentable si necesitas la plata ya.</div>
+        </div>
+
+        <div class="atb-summary-card">
+          <h3>3. Farmeo (Mist / mazmorra)</h3>
+          ${mejorBuild ? `
+            <div class="atb-summary-value">${mejorBuild.plata_hora_min.toLocaleString('es-CO')}–${mejorBuild.plata_hora_max.toLocaleString('es-CO')}/h</div>
+            <div class="atb-summary-sub">${mejorBuild.arma} · ${mejorBuild.zona} · ya cumples el IP mínimo (${mejorBuild.ip_minimo})</div>
+          ` : siguienteBuild ? `
+            <div class="atb-summary-value">Aún ninguna</div>
+            <div class="atb-summary-sub">Te faltan ${siguienteBuild.ip_minimo - (perfil.ip_actual || 0)} de IP para "${siguienteBuild.arma}" (la más accesible del catálogo)</div>
+          ` : `<div class="atb-summary-sub">Configura tu perfil en la pestaña "Builds de farmeo".</div>`}
+          <div class="atb-summary-tip"><strong>Tip:</strong> la app no puede darte la ubicación de un portal — se generan al azar en tu zona y los encuentras explorando. Espera ~90 segundos tras entrar a una mazmorra solo para que el portal se cierre y nadie te invada.</div>
+        </div>
+      </div>
+
+      <div class="atb-tip">
+        <strong>Cómo leer este resumen:</strong> son 3 formas distintas de ganar plata, no se excluyen entre sí. El flip y el spread dependen del mercado (datos reales, actualizados por el cron). El farmeo depende de tu personaje y de lo que encuentres jugando — los números de esa columna son estimados de guías de la comunidad, no una promesa exacta.
+      </div>
+    `;
+  }
+
   function renderTable(list) {
+    const tip = activeTab === 'routes'
+      ? '<div class="atb-tip"><strong>Tip:</strong> ordena mentalmente por puntaje, no por margen bruto — dos rutas con margen parecido pueden tener riesgo muy distinto. Evita cargar items pesados en rutas de riesgo alto si vas justo de tiempo para reaccionar a un gank.</div>'
+      : '<div class="atb-tip"><strong>Tip:</strong> revisa el punto rojo (●) al lado del item — indica que el precio tiene más de 6 horas. Confírmalo en el juego antes de comprometerte con el viaje.</div>';
+
     if (!list.length) {
-      contentEl.innerHTML = '<div class="atb-empty">No hay rutas rentables con los filtros actuales, o todavía no hay precios guardados. Dale clic a "Traer últimos precios".</div>';
+      contentEl.innerHTML = tip + '<div class="atb-empty">No hay rutas rentables con los filtros actuales, o todavía no hay precios guardados. Dale clic a "Traer últimos precios".</div>';
       return;
     }
     let extraCol = activeTab === 'routes' ? '<th>Items rentables</th>' : '<th>Tier</th>';
@@ -368,7 +684,7 @@
       </tr>`;
     });
     html += '</tbody></table>';
-    contentEl.innerHTML = html;
+    contentEl.innerHTML = tip + html;
   }
 
   async function renderHistory() {
@@ -476,4 +792,5 @@
 </script>
 </body>
 </html>
+
 
