@@ -20,35 +20,102 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # ---------------------------------------------------------------------------
 # Catálogo de items y ciudades (única fuente de verdad, se pasa al frontend)
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# ITEMS con campo "peso" (kg) agregado — reemplaza la lista ITEMS completa
+# en app.py con esta versión.
+#
+# IMPORTANTE — honestidad sobre estos números:
+# Los pesos son una ESTIMACIÓN mía basada en patrones típicos del juego
+# (recursos crudos livianos, refinados un poco más pesados, equipo más
+# pesado todavía), NO son datos extraídos del juego ni de un dump oficial.
+# Antes de confiar en los cálculos de "unidades óptimas de carga", verifica
+# el peso real de al menos 2-3 items que uses seguido: pasa el mouse sobre
+# el item en tu inventario en el juego, el tooltip muestra el peso en kg.
+# Si el número no coincide, ajusta esa línea aquí abajo — es solo un
+# diccionario de Python, no hace falta tocar nada más.
+# ---------------------------------------------------------------------------
 ITEMS = [
-    {"id": "T4_ORE", "name": "Mineral T4", "tier": 4}, {"id": "T4_METALBAR", "name": "Lingote T4", "tier": 4},
-    {"id": "T4_HIDE", "name": "Cuero crudo T4", "tier": 4}, {"id": "T4_LEATHER", "name": "Cuero curtido T4", "tier": 4},
-    {"id": "T4_FIBER", "name": "Fibra T4", "tier": 4}, {"id": "T4_CLOTH", "name": "Tela T4", "tier": 4},
-    {"id": "T4_WOOD", "name": "Madera T4", "tier": 4}, {"id": "T4_PLANKS", "name": "Tablones T4", "tier": 4},
-    {"id": "T4_ROCK", "name": "Piedra T4", "tier": 4}, {"id": "T4_STONEBLOCK", "name": "Bloque de piedra T4", "tier": 4},
-    {"id": "T6_ORE", "name": "Mineral T6", "tier": 6}, {"id": "T6_METALBAR", "name": "Lingote T6", "tier": 6},
-    {"id": "T6_HIDE", "name": "Cuero crudo T6", "tier": 6}, {"id": "T6_LEATHER", "name": "Cuero curtido T6", "tier": 6},
-    {"id": "T6_FIBER", "name": "Fibra T6", "tier": 6}, {"id": "T6_CLOTH", "name": "Tela T6", "tier": 6},
-    {"id": "T6_WOOD", "name": "Madera T6", "tier": 6}, {"id": "T6_PLANKS", "name": "Tablones T6", "tier": 6},
-    {"id": "T6_ROCK", "name": "Piedra T6", "tier": 6}, {"id": "T6_STONEBLOCK", "name": "Bloque de piedra T6", "tier": 6},
-    {"id": "T8_ORE", "name": "Mineral T8", "tier": 8}, {"id": "T8_METALBAR", "name": "Lingote T8", "tier": 8},
-    {"id": "T8_HIDE", "name": "Cuero crudo T8", "tier": 8}, {"id": "T8_LEATHER", "name": "Cuero curtido T8", "tier": 8},
-    {"id": "T8_FIBER", "name": "Fibra T8", "tier": 8}, {"id": "T8_CLOTH", "name": "Tela T8", "tier": 8},
-    {"id": "T8_WOOD", "name": "Madera T8", "tier": 8}, {"id": "T8_PLANKS", "name": "Tablones T8", "tier": 8},
-    {"id": "T4_MAIN_SWORD", "name": "Espada T4", "tier": 4}, {"id": "T6_MAIN_SWORD", "name": "Espada T6", "tier": 6}, {"id": "T8_MAIN_SWORD", "name": "Espada T8", "tier": 8},
-    {"id": "T4_MAIN_AXE", "name": "Hacha T4", "tier": 4}, {"id": "T6_MAIN_AXE", "name": "Hacha T6", "tier": 6}, {"id": "T8_MAIN_AXE", "name": "Hacha T8", "tier": 8},
-    {"id": "T4_2H_BOW", "name": "Arco T4", "tier": 4}, {"id": "T6_2H_BOW", "name": "Arco T6", "tier": 6}, {"id": "T8_2H_BOW", "name": "Arco T8", "tier": 8},
-    {"id": "T4_2H_FIRESTAFF", "name": "Bastón de fuego T4", "tier": 4}, {"id": "T6_2H_FIRESTAFF", "name": "Bastón de fuego T6", "tier": 6}, {"id": "T8_2H_FIRESTAFF", "name": "Bastón de fuego T8", "tier": 8},
-    {"id": "T4_MAIN_HOLYSTAFF", "name": "Bastón sagrado T4", "tier": 4}, {"id": "T6_MAIN_HOLYSTAFF", "name": "Bastón sagrado T6", "tier": 6}, {"id": "T8_MAIN_HOLYSTAFF", "name": "Bastón sagrado T8", "tier": 8},
-    {"id": "T4_ARMOR_PLATE_SET1", "name": "Armadura placa T4", "tier": 4}, {"id": "T6_ARMOR_PLATE_SET1", "name": "Armadura placa T6", "tier": 6}, {"id": "T8_ARMOR_PLATE_SET1", "name": "Armadura placa T8", "tier": 8},
-    {"id": "T4_ARMOR_LEATHER_SET1", "name": "Armadura cuero T4", "tier": 4}, {"id": "T6_ARMOR_LEATHER_SET1", "name": "Armadura cuero T6", "tier": 6}, {"id": "T8_ARMOR_LEATHER_SET1", "name": "Armadura cuero T8", "tier": 8},
-    {"id": "T4_ARMOR_CLOTH_SET1", "name": "Armadura tela T4", "tier": 4}, {"id": "T6_ARMOR_CLOTH_SET1", "name": "Armadura tela T6", "tier": 6}, {"id": "T8_ARMOR_CLOTH_SET1", "name": "Armadura tela T8", "tier": 8},
-    {"id": "T4_HEAD_PLATE_SET1", "name": "Casco placa T4", "tier": 4}, {"id": "T6_HEAD_PLATE_SET1", "name": "Casco placa T6", "tier": 6}, {"id": "T8_HEAD_PLATE_SET1", "name": "Casco placa T8", "tier": 8},
-    {"id": "T4_SHOES_PLATE_SET1", "name": "Botas placa T4", "tier": 4}, {"id": "T6_SHOES_PLATE_SET1", "name": "Botas placa T6", "tier": 6}, {"id": "T8_SHOES_PLATE_SET1", "name": "Botas placa T8", "tier": 8},
-    {"id": "T4_POTION_HEAL", "name": "Poción de curación T4", "tier": 4}, {"id": "T6_POTION_HEAL", "name": "Poción de curación T6", "tier": 6}, {"id": "T8_POTION_HEAL", "name": "Poción de curación T8", "tier": 8},
-    {"id": "T4_MEAL_OMELETTE", "name": "Omelette T4", "tier": 4}, {"id": "T6_MEAL_OMELETTE", "name": "Omelette T6", "tier": 6}, {"id": "T8_MEAL_OMELETTE", "name": "Omelette T8", "tier": 8},
-    {"id": "T4_MEAL_SOUP", "name": "Sopa T4", "tier": 4}, {"id": "T6_MEAL_SOUP", "name": "Sopa T6", "tier": 6}, {"id": "T8_MEAL_SOUP", "name": "Sopa T8", "tier": 8},
+    # --- Materias primas (livianas) ---
+    {"id": "T4_ORE", "name": "Mineral T4", "tier": 4, "peso": 1.4},
+    {"id": "T4_HIDE", "name": "Cuero crudo T4", "tier": 4, "peso": 1.4},
+    {"id": "T4_FIBER", "name": "Fibra T4", "tier": 4, "peso": 1.4},
+    {"id": "T4_WOOD", "name": "Madera T4", "tier": 4, "peso": 1.4},
+    {"id": "T4_ROCK", "name": "Piedra T4", "tier": 4, "peso": 1.4},
+    {"id": "T6_ORE", "name": "Mineral T6", "tier": 6, "peso": 2.1},
+    {"id": "T6_HIDE", "name": "Cuero crudo T6", "tier": 6, "peso": 2.1},
+    {"id": "T6_FIBER", "name": "Fibra T6", "tier": 6, "peso": 2.1},
+    {"id": "T6_WOOD", "name": "Madera T6", "tier": 6, "peso": 2.1},
+    {"id": "T6_ROCK", "name": "Piedra T6", "tier": 6, "peso": 2.1},
+    {"id": "T8_ORE", "name": "Mineral T8", "tier": 8, "peso": 2.8},
+    {"id": "T8_HIDE", "name": "Cuero crudo T8", "tier": 8, "peso": 2.8},
+    {"id": "T8_FIBER", "name": "Fibra T8", "tier": 8, "peso": 2.8},
+    {"id": "T8_WOOD", "name": "Madera T8", "tier": 8, "peso": 2.8},
+
+    # --- Refinados (un poco más pesados que la materia prima) ---
+    {"id": "T4_METALBAR", "name": "Lingote T4", "tier": 4, "peso": 1.9},
+    {"id": "T4_LEATHER", "name": "Cuero curtido T4", "tier": 4, "peso": 1.9},
+    {"id": "T4_CLOTH", "name": "Tela T4", "tier": 4, "peso": 1.9},
+    {"id": "T4_PLANKS", "name": "Tablones T4", "tier": 4, "peso": 1.9},
+    {"id": "T4_STONEBLOCK", "name": "Bloque de piedra T4", "tier": 4, "peso": 1.9},
+    {"id": "T6_METALBAR", "name": "Lingote T6", "tier": 6, "peso": 2.8},
+    {"id": "T6_LEATHER", "name": "Cuero curtido T6", "tier": 6, "peso": 2.8},
+    {"id": "T6_CLOTH", "name": "Tela T6", "tier": 6, "peso": 2.8},
+    {"id": "T6_PLANKS", "name": "Tablones T6", "tier": 6, "peso": 2.8},
+    {"id": "T6_STONEBLOCK", "name": "Bloque de piedra T6", "tier": 6, "peso": 2.8},
+    {"id": "T8_METALBAR", "name": "Lingote T8", "tier": 8, "peso": 3.7},
+    {"id": "T8_LEATHER", "name": "Cuero curtido T8", "tier": 8, "peso": 3.7},
+    {"id": "T8_CLOTH", "name": "Tela T8", "tier": 8, "peso": 3.7},
+    {"id": "T8_PLANKS", "name": "Tablones T8", "tier": 8, "peso": 3.7},
+
+    # --- Armas (más pesadas, una por slot) ---
+    {"id": "T4_MAIN_SWORD", "name": "Espada T4", "tier": 4, "peso": 5.0},
+    {"id": "T6_MAIN_SWORD", "name": "Espada T6", "tier": 6, "peso": 6.5},
+    {"id": "T8_MAIN_SWORD", "name": "Espada T8", "tier": 8, "peso": 8.0},
+    {"id": "T4_MAIN_AXE", "name": "Hacha T4", "tier": 4, "peso": 5.0},
+    {"id": "T6_MAIN_AXE", "name": "Hacha T6", "tier": 6, "peso": 6.5},
+    {"id": "T8_MAIN_AXE", "name": "Hacha T8", "tier": 8, "peso": 8.0},
+    {"id": "T4_2H_BOW", "name": "Arco T4", "tier": 4, "peso": 5.5},
+    {"id": "T6_2H_BOW", "name": "Arco T6", "tier": 6, "peso": 7.0},
+    {"id": "T8_2H_BOW", "name": "Arco T8", "tier": 8, "peso": 8.5},
+    {"id": "T4_2H_FIRESTAFF", "name": "Bastón de fuego T4", "tier": 4, "peso": 5.5},
+    {"id": "T6_2H_FIRESTAFF", "name": "Bastón de fuego T6", "tier": 6, "peso": 7.0},
+    {"id": "T8_2H_FIRESTAFF", "name": "Bastón de fuego T8", "tier": 8, "peso": 8.5},
+    {"id": "T4_MAIN_HOLYSTAFF", "name": "Bastón sagrado T4", "tier": 4, "peso": 5.0},
+    {"id": "T6_MAIN_HOLYSTAFF", "name": "Bastón sagrado T6", "tier": 6, "peso": 6.5},
+    {"id": "T8_MAIN_HOLYSTAFF", "name": "Bastón sagrado T8", "tier": 8, "peso": 8.0},
+
+    # --- Armaduras (piezas de torso, más pesadas) ---
+    {"id": "T4_ARMOR_PLATE_SET1", "name": "Armadura placa T4", "tier": 4, "peso": 7.0},
+    {"id": "T6_ARMOR_PLATE_SET1", "name": "Armadura placa T6", "tier": 6, "peso": 9.0},
+    {"id": "T8_ARMOR_PLATE_SET1", "name": "Armadura placa T8", "tier": 8, "peso": 11.0},
+    {"id": "T4_ARMOR_LEATHER_SET1", "name": "Armadura cuero T4", "tier": 4, "peso": 5.5},
+    {"id": "T6_ARMOR_LEATHER_SET1", "name": "Armadura cuero T6", "tier": 6, "peso": 7.0},
+    {"id": "T8_ARMOR_LEATHER_SET1", "name": "Armadura cuero T8", "tier": 8, "peso": 8.5},
+    {"id": "T4_ARMOR_CLOTH_SET1", "name": "Armadura tela T4", "tier": 4, "peso": 4.0},
+    {"id": "T6_ARMOR_CLOTH_SET1", "name": "Armadura tela T6", "tier": 6, "peso": 5.0},
+    {"id": "T8_ARMOR_CLOTH_SET1", "name": "Armadura tela T8", "tier": 8, "peso": 6.0},
+
+    # --- Cascos y botas (piezas más chicas, más livianas) ---
+    {"id": "T4_HEAD_PLATE_SET1", "name": "Casco placa T4", "tier": 4, "peso": 3.0},
+    {"id": "T6_HEAD_PLATE_SET1", "name": "Casco placa T6", "tier": 6, "peso": 3.8},
+    {"id": "T8_HEAD_PLATE_SET1", "name": "Casco placa T8", "tier": 8, "peso": 4.6},
+    {"id": "T4_SHOES_PLATE_SET1", "name": "Botas placa T4", "tier": 4, "peso": 3.0},
+    {"id": "T6_SHOES_PLATE_SET1", "name": "Botas placa T6", "tier": 6, "peso": 3.8},
+    {"id": "T8_SHOES_PLATE_SET1", "name": "Botas placa T8", "tier": 8, "peso": 4.6},
+
+    # --- Consumibles (livianos, casi no varían por tier) ---
+    {"id": "T4_POTION_HEAL", "name": "Poción de curación T4", "tier": 4, "peso": 0.6},
+    {"id": "T6_POTION_HEAL", "name": "Poción de curación T6", "tier": 6, "peso": 0.6},
+    {"id": "T8_POTION_HEAL", "name": "Poción de curación T8", "tier": 8, "peso": 0.6},
+    {"id": "T4_MEAL_OMELETTE", "name": "Omelette T4", "tier": 4, "peso": 0.5},
+    {"id": "T6_MEAL_OMELETTE", "name": "Omelette T6", "tier": 6, "peso": 0.5},
+    {"id": "T8_MEAL_OMELETTE", "name": "Omelette T8", "tier": 8, "peso": 0.5},
+    {"id": "T4_MEAL_SOUP", "name": "Sopa T4", "tier": 4, "peso": 0.5},
+    {"id": "T6_MEAL_SOUP", "name": "Sopa T6", "tier": 6, "peso": 0.5},
+    {"id": "T8_MEAL_SOUP", "name": "Sopa T8", "tier": 8, "peso": 0.5},
 ]
+
+
 
 CITIES = [
     {"id": "Caerleon", "name": "Caerleon"},
@@ -68,6 +135,12 @@ SERVER_HOSTS = {
 
 ITEMS_BY_ID = {i["id"]: i for i in ITEMS}
 CITIES_BY_ID = {c["id"]: c for c in CITIES}
+
+
+def unidades_optimas(peso_item_kg, capacidad_kg):
+    if not peso_item_kg or peso_item_kg <= 0 or not capacidad_kg:
+        return 0
+    return int(capacidad_kg // peso_item_kg)
 
 WEAPON_TYPES = [
     "Espada", "Hacha", "Maza", "Lanza", "Daga", "Arco", "Ballesta",
@@ -509,6 +582,10 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
 
 
 
