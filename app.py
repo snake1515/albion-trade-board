@@ -68,6 +68,9 @@ SERVER_HOSTS = {
     "east": "east.albion-online-data.com",
 }
 
+ITEMS_BY_ID = {i["id"]: i for i in ITEMS}
+CITIES_BY_ID = {c["id"]: c for c in CITIES}
+
 
 # ---------------------------------------------------------------------------
 # Lógica del cron: trae precios de AODP, los guarda, calcula márgenes
@@ -182,7 +185,7 @@ scheduler.start()
 
 @app.route("/")
 def index():
-    return render_template("index.html", items_json=json.dumps(ITEMS), cities_json=json.dumps(CITIES))
+    return render_template("index.html", items_json=json.dumps(ITEMS), cities_json=json.dumps(CITIES), weapons_json=json.dumps(WEAPON_TYPES))
 
 
 @app.route("/api/precios")
@@ -234,6 +237,76 @@ def api_config():
         return jsonify(res.data)
 
     return jsonify(get_config())
+
+
+@app.route("/api/ordenes", methods=["GET", "POST"])
+def api_ordenes():
+    if request.method == "POST":
+        body = request.get_json()
+        item = ITEMS_BY_ID.get(body["item_id"])
+        if not item:
+            return jsonify({"error": "item no reconocido"}), 400
+        nueva = {
+            "item_id": item["id"],
+            "item_name": item["name"],
+            "city": body["city"],
+            "tipo": body["tipo"],
+            "precio": body["precio"],
+            "cantidad": body.get("cantidad", 1),
+        }
+        res = supabase.table("seguimiento_ordenes").insert(nueva).execute()
+        return jsonify(res.data), 201
+
+    res = supabase.table("seguimiento_ordenes").select("*").order("fecha_creacion", desc=True).execute()
+    return jsonify(res.data)
+
+
+@app.route("/api/ordenes/<int:orden_id>/completar", methods=["POST"])
+def api_ordenes_completar(orden_id):
+    actual = supabase.table("seguimiento_ordenes").select("*").eq("id", orden_id).single().execute()
+    if not actual.data:
+        return jsonify({"error": "no encontrada"}), 404
+
+    creado = datetime.fromisoformat(actual.data["fecha_creacion"].replace("Z", "+00:00"))
+    ahora = datetime.now(timezone.utc)
+    duracion_horas = round((ahora - creado).total_seconds() / 3600, 2)
+
+    res = supabase.table("seguimiento_ordenes").update({
+        "fecha_completada": ahora.isoformat(),
+        "duracion_horas": duracion_horas,
+    }).eq("id", orden_id).execute()
+    return jsonify(res.data)
+
+
+@app.route("/api/ordenes/<int:orden_id>", methods=["DELETE"])
+def api_ordenes_delete(orden_id):
+    supabase.table("seguimiento_ordenes").delete().eq("id", orden_id).execute()
+    return jsonify({"deleted": True})
+
+
+WEAPON_TYPES = [
+    "Espada", "Hacha", "Maza", "Lanza", "Daga", "Arco", "Ballesta",
+    "Bastón de fuego", "Bastón sagrado", "Bastón de la naturaleza",
+    "Bastón arcano", "Bastón maldito", "Bastón doble", "Garras",
+]
+
+
+@app.route("/api/perfil", methods=["GET", "POST"])
+def api_perfil():
+    if request.method == "POST":
+        body = request.get_json()
+        body["id"] = 1
+        res = supabase.table("perfil_personaje").upsert(body).execute()
+        return jsonify(res.data)
+
+    res = supabase.table("perfil_personaje").select("*").eq("id", 1).single().execute()
+    return jsonify(res.data or {})
+
+
+@app.route("/api/builds")
+def api_builds():
+    res = supabase.table("builds_farmeo").select("*").order("tier").execute()
+    return jsonify(res.data)
 
 
 @app.route("/api/refrescar")
