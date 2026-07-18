@@ -66,6 +66,7 @@
   .atb-profit-neg { color: #d97a7a; }
   .atb-stale { color: var(--red); font-size: 10px; margin-left: 6px; }
   .atb-tier-pill { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 10px; padding: 2px 6px; border-radius: 3px; background: var(--panel-raised); color: var(--teal); border: 1px solid var(--hairline); }
+  .atb-content-pill { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 10px; padding: 2px 6px; border-radius: 3px; background: var(--panel-raised); color: var(--gold-bright); border: 1px solid var(--hairline); margin-left: 6px; }
 
   .atb-empty { text-align: center; padding: 40px 20px; color: var(--text-muted); font-size: 13px; }
   .atb-note { font-size: 11.5px; color: var(--text-muted); line-height: 1.6; border-left: 2px solid var(--gold); padding: 10px 14px; background: var(--panel-raised); border-radius: 0 4px 4px 0; margin-top: 16px; }
@@ -96,6 +97,17 @@
   .atb-summary-value { font-family: 'IBM Plex Mono', monospace; font-size: 21px; color: #7fc9a3; margin-bottom: 6px; }
   .atb-summary-sub { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 10px; }
   .atb-summary-tip { font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--hairline); padding-top: 8px; margin-top: 8px; line-height: 1.5; }
+
+  .atb-weapon-panel { background: var(--panel-raised); border: 1px solid var(--hairline); border-left: 3px solid var(--teal); border-radius: 0 6px 6px 0; padding: 16px; margin-bottom: 20px; }
+  .atb-weapon-panel h4 { font-family: 'Cinzel', serif; font-size: 14px; color: var(--gold-bright); margin: 0 0 8px; }
+  .atb-weapon-role { font-size: 12.5px; color: var(--text); margin-bottom: 10px; line-height: 1.5; }
+  .atb-weapon-tips { list-style: none; padding: 0; margin: 0 0 10px; }
+  .atb-weapon-tips li { font-size: 12px; color: var(--text-muted); line-height: 1.6; padding-left: 14px; position: relative; margin-bottom: 4px; }
+  .atb-weapon-tips li::before { content: '›'; position: absolute; left: 0; color: var(--teal); }
+  .atb-weapon-content { font-size: 12px; color: var(--teal); border-top: 1px solid var(--hairline); padding-top: 8px; margin-top: 8px; }
+  .atb-ip-suggestion { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; }
+
+  .atb-section-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; margin: 18px 0 10px; }
 
   @media (max-width: 700px) { .atb-event-form { grid-template-columns: 1fr 1fr; } }
 </style>
@@ -177,6 +189,7 @@
   const ITEMS = {{ items_json | safe }};
   const CITIES = {{ cities_json | safe }};
   const WEAPONS = {{ weapons_json | safe }};
+  const WEAPON_TIPS = {{ weapon_tips_json | safe }};
 
   const statusEl = document.getElementById('atb-status');
   const contentEl = document.getElementById('atb-content');
@@ -187,11 +200,22 @@
   let riskValues = {};
   let config = {};
   let selectedHistoryItem = null;
+  let selectedWeapon = null;
 
   function riskColor(risk) {
     if (risk >= 60) return '#b23a3a';
     if (risk >= 35) return '#c9a227';
     return '#4a9483';
+  }
+
+  // Recomendación general de nivel de Mist según IP (independiente del arma)
+  function nivelMistSugerido(ip) {
+    if (!ip) return 'Configura tu IP para ver una sugerencia.';
+    if (ip < 700) return 'Mist Nivel 1 — sube tu equipo antes de arriesgarte más alto.';
+    if (ip < 900) return 'Mist Nivel 2.';
+    if (ip < 1100) return 'Mist Nivel 3, o mazmorras estáticas T4-T5 en grupo.';
+    if (ip < 1300) return 'Mist Nivel 4, o mazmorras estáticas T6 en grupo.';
+    return 'Mazmorras estáticas T7-T8 y contenido avanzado.';
   }
 
   function buildRiskGrid() {
@@ -498,13 +522,30 @@
     });
   }
 
+  function renderWeaponSuggestionPanel(armaKey, ipActual) {
+    const info = WEAPON_TIPS[armaKey];
+    if (!info) return '';
+    const tipsHtml = info.tips.map(t => `<li>${t}</li>`).join('');
+    return `
+      <div class="atb-weapon-panel">
+        <h4>Sugerencias para ${armaKey}</h4>
+        <div class="atb-weapon-role">${info.rol}</div>
+        <ul class="atb-weapon-tips">${tipsHtml}</ul>
+        <div class="atb-weapon-content">Contenido recomendado para esta arma: ${info.contenido}</div>
+        <div class="atb-ip-suggestion">Según tu IP actual (${ipActual || '?'}): ${nivelMistSugerido(ipActual)}</div>
+      </div>
+    `;
+  }
+
   async function renderBuilds() {
     contentEl.innerHTML = '<div class="atb-empty">Cargando perfil y builds...</div>';
     const [perfilRes, buildsRes] = await Promise.all([fetch('/api/perfil'), fetch('/api/builds')]);
     const perfil = await perfilRes.json();
     const builds = await buildsRes.json();
     const maestrias = perfil.maestria_armas || {};
+    if (!selectedWeapon) selectedWeapon = perfil.arma_principal || WEAPONS[0];
 
+    const weaponSelectOptions = WEAPONS.map(w => `<option value="${w}" ${w === selectedWeapon ? 'selected' : ''}>${w}</option>`).join('');
     const weaponInputs = WEAPONS.map(w => `
       <div class="atb-field">
         <label for="atb-mst-${w}">${w}</label>
@@ -513,14 +554,17 @@
 
     const tierColor = { S: 'var(--gold-bright)', A: 'var(--teal)', B: 'var(--text-muted)' };
     const riesgoColor = { alto: 'var(--red)', 'muy alto': 'var(--red)', medio: 'var(--gold)', bajo: 'var(--teal)' };
+    const contenidoLabel = { mist: 'Mist', dungeon: 'Mazmorra', ambos: 'Mist + Mazmorra' };
 
-    const buildCards = builds.map(b => {
+    function buildCard(b) {
       const cumpleIP = (perfil.ip_actual || 0) >= b.ip_minimo;
       const faltaIP = b.ip_minimo - (perfil.ip_actual || 0);
       return `
         <div class="atb-event-card" style="border-left-color:${tierColor[b.tier] || 'var(--gold)'};">
           <div>
-            <div class="atb-event-meta">${b.zona} · Tier ${b.tier} · Riesgo <span style="color:${riesgoColor[b.riesgo] || 'var(--text-muted)'}">${b.riesgo}</span></div>
+            <div class="atb-event-meta">${b.zona} · Tier ${b.tier} · Riesgo <span style="color:${riesgoColor[b.riesgo] || 'var(--text-muted)'}">${b.riesgo}</span>
+              <span class="atb-content-pill">${contenidoLabel[b.tipo_contenido] || 'Mist'}</span>
+            </div>
             <div class="atb-event-title">${b.arma}${b.offhand ? ' + ' + b.offhand : ''}</div>
             <div class="atb-event-notes">
               Armadura: ${b.armadura} · IP mínimo: ${b.ip_minimo} ·
@@ -532,10 +576,14 @@
             </div>
           </div>
         </div>`;
-    }).join('');
+    }
+
+    const buildsPropias = builds.filter(b => b.arma === selectedWeapon);
+    const buildsOtras = builds.filter(b => b.arma !== selectedWeapon);
 
     contentEl.innerHTML = `
       <div class="atb-tip"><strong>Tip:</strong> la app no puede darte la ubicación de un portal de Mist o mazmorra — se generan al azar y los encuentras explorando tu zona. Si entras a una mazmorra solo, espera ~90 segundos antes de moverte para que el portal se cierre y nadie más pueda invadirte.</div>
+
       <div class="atb-controls-grid" style="margin-bottom:18px;">
         <div class="atb-field"><label for="atb-perfil-ip">Tu IP actual</label><input type="number" id="atb-perfil-ip" value="${perfil.ip_actual ?? 1200}"></div>
         <div class="atb-field"><label for="atb-perfil-armadura">Especialización de armadura</label>
@@ -545,20 +593,42 @@
             <option value="tela" ${perfil.especializacion_armadura === 'tela' ? 'selected' : ''}>Tela</option>
           </select>
         </div>
+        <div class="atb-field"><label for="atb-perfil-arma">Arma principal</label>
+          <select id="atb-perfil-arma">${weaponSelectOptions}</select>
+        </div>
         <button class="atb-btn" id="atb-perfil-save">Guardar perfil</button>
       </div>
+
+      <div id="atb-weapon-suggestion">${renderWeaponSuggestionPanel(selectedWeapon, perfil.ip_actual)}</div>
 
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">Maestría por arma</p>
       <div class="atb-risk-grid" style="margin-bottom:22px;">${weaponInputs}</div>
 
-      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">Catálogo de builds (curado de guías de la comunidad, no cálculo exacto)</p>
-      <div class="atb-timeline">${buildCards || '<div class="atb-empty">Sin builds en el catálogo todavía.</div>'}</div>
+      <p class="atb-section-label">Builds para tu arma (${selectedWeapon})</p>
+      <div class="atb-timeline">${buildsPropias.map(buildCard).join('') || '<div class="atb-empty">Sin builds curadas todavía para esta arma.</div>'}</div>
+
+      <p class="atb-section-label">Otras builds rentables para dungeon / farmeo</p>
+      <div class="atb-timeline">${buildsOtras.map(buildCard).join('') || '<div class="atb-empty">Sin más builds en el catálogo todavía.</div>'}</div>
 
       <p style="font-size:11px; color:var(--text-muted); margin-top:14px; line-height:1.5;">
-        Los rangos de plata/hora y tiers vienen de guías y tier lists públicas de la comunidad (mid-2026), no de un cálculo exacto de tu personaje —
+        Los rangos de plata/hora, tiers y tips vienen de guías y foros de la comunidad (mid-2026), no de un cálculo exacto de tu personaje —
         el meta cambia con cada parche de balance, así que trátalo como punto de partida, no como verdad absoluta.
       </p>
     `;
+
+    document.getElementById('atb-perfil-arma').addEventListener('change', e => {
+      selectedWeapon = e.target.value;
+      document.getElementById('atb-weapon-suggestion').innerHTML = renderWeaponSuggestionPanel(
+        selectedWeapon, Number(document.getElementById('atb-perfil-ip').value)
+      );
+      renderBuilds();
+    });
+
+    document.getElementById('atb-perfil-ip').addEventListener('change', e => {
+      document.getElementById('atb-weapon-suggestion').innerHTML = renderWeaponSuggestionPanel(
+        selectedWeapon, Number(e.target.value)
+      );
+    });
 
     document.getElementById('atb-perfil-save').addEventListener('click', async () => {
       const maestria_armas = {};
@@ -569,6 +639,7 @@
         body: JSON.stringify({
           ip_actual: Number(document.getElementById('atb-perfil-ip').value),
           especializacion_armadura: document.getElementById('atb-perfil-armadura').value,
+          arma_principal: document.getElementById('atb-perfil-arma').value,
           maestria_armas,
         }),
       });
@@ -792,5 +863,6 @@
 </script>
 </body>
 </html>
+
 
 
