@@ -41,6 +41,8 @@
   .atb-field select:focus, .atb-field input:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
   .atb-field-hint { display: block; font-size: 10.5px; color: var(--text-muted); margin-top: 5px; line-height: 1.4; }
   .atb-field-hint.atb-hint-warn { color: var(--gold); }
+  tr.atb-row-suspicious td { opacity: 0.75; }
+  .atb-suspicious-tag { display: inline-block; margin-left: 6px; font-size: 10.5px; color: #e0a53a; border: 1px solid #6b4d1c; background: rgba(224,165,58,0.08); padding: 1px 6px; border-radius: 10px; white-space: nowrap; }
 
   .atb-btn { background: var(--gold); color: #1a1206; border: none; padding: 10px 18px; border-radius: 4px; font-family: 'Inter', sans-serif; font-weight: 700; font-size: 13px; cursor: pointer; letter-spacing: 0.3px; transition: background 0.15s ease; }
   .atb-btn:hover { background: var(--gold-bright); }
@@ -203,6 +205,7 @@
     <button class="atb-tab" data-tab="routes">Por ruta</button>
     <button class="atb-tab" data-tab="spread">Spread</button>
     <button class="atb-tab" data-tab="orders">Seguimiento</button>
+    <button class="atb-tab" data-tab="compras">Mis compras</button>
     <button class="atb-tab" data-tab="history">Historial</button>
     <button class="atb-tab" data-tab="events">Eventos</button>
     <button class="atb-tab" data-tab="builds">Builds de farmeo</button>
@@ -509,6 +512,7 @@
     if (activeTab === 'events') { renderEvents(); return; }
     if (activeTab === 'spread') { renderSpread(); return; }
     if (activeTab === 'orders') { renderOrders(); return; }
+    if (activeTab === 'compras') { renderCompras(); return; }
     if (activeTab === 'builds') { renderBuilds(); return; }
     if (!lastRows.length) {
       contentEl.innerHTML = '<div class="atb-empty">Todavía no hay precios guardados. Dale clic a "Traer últimos precios" para la primera carga (el cron automático corre cada hora).</div>';
@@ -576,19 +580,24 @@
     </tr></thead><tbody>`;
     rows.slice(0, 40).forEach(r => {
       const staleWarn = r.ageHours > 6 ? `<span class="atb-stale">●</span>` : '';
-      html += `<tr>
+      const suspicious = r.spreadPct >= 80;
+      const suspiciousTag = suspicious
+        ? `<span class="atb-suspicious-tag" title="Spread extremo: probablemente una orden fantasma o un mercado sin volumen real. No te fíes de este número.">⚠ sospechoso</span>`
+        : '';
+      html += `<tr class="${suspicious ? 'atb-row-suspicious' : ''}">
         <td class="atb-item-name">${r.item.name}${staleWarn}</td>
         <td class="atb-route">${r.city.name}</td>
         <td>${Math.round(r.ask).toLocaleString('es-CO')}</td>
         <td>${Math.round(r.bid).toLocaleString('es-CO')}</td>
         <td class="${r.spread >= 0 ? 'atb-profit-pos' : 'atb-profit-neg'}">${Math.round(r.spread).toLocaleString('es-CO')}</td>
-        <td class="${r.spreadPct >= 0 ? 'atb-profit-pos' : 'atb-profit-neg'}">${r.spreadPct.toFixed(1)}%</td>
+        <td class="${r.spreadPct >= 0 ? 'atb-profit-pos' : 'atb-profit-neg'}">${r.spreadPct.toFixed(1)}% ${suspiciousTag}</td>
       </tr>`;
     });
     html += '</tbody></table>';
     html += `<p style="font-size:11px; color:var(--text-muted); margin-top:12px;">
       Esto es el colchón de precio dentro de una sola ciudad (comprar y poner tu propia orden de venta un poco más barata que el precio actual).
-      No indica qué tan rápido se vendería — para eso usa la pestaña "Seguimiento".
+      No indica qué tan rápido se vendería — para eso usa la pestaña "Seguimiento". Las filas marcadas con ⚠ tienen un spread tan grande (80%+) que casi
+      siempre es un mercado sin volumen real u orden fantasma, no una oportunidad real.
     </p>`;
     contentEl.innerHTML = '<div class="atb-tip"><strong>Tip:</strong> undercut mínimo (1-2 plata menos que el precio actual) suele venderse más rápido que undercuts grandes — no regales margen de golpe.</div>' + html;
   }
@@ -672,6 +681,105 @@
       btn.addEventListener('click', async () => {
         await fetch('/api/ordenes/' + btn.dataset.id, { method: 'DELETE' });
         renderOrders();
+      });
+    });
+  }
+
+  async function renderCompras() {
+    contentEl.innerHTML = '<div class="atb-empty">Cargando compras...</div>';
+    const res = await fetch('/api/compras');
+    const compras = await res.json();
+
+    const itemOptions = ITEMS.map(i => `<option value="${i.id}">${i.name}</option>`).join('');
+    const cityOptions = CITIES.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+
+    const pendientes = compras.filter(c => !c.vendido);
+    const vendidas = compras.filter(c => c.vendido);
+    const totalInvertido = pendientes.reduce((sum, c) => sum + Number(c.precio_oro) * Number(c.cantidad), 0);
+
+    // Agrupa pendientes por ciudad para que sea fácil ver "qué tengo dónde"
+    const porCiudad = {};
+    pendientes.forEach(c => {
+      porCiudad[c.city] = porCiudad[c.city] || [];
+      porCiudad[c.city].push(c);
+    });
+
+    function rowFor(c, activa) {
+      const total = Number(c.precio_oro) * Number(c.cantidad);
+      return `
+        <tr>
+          <td class="atb-item-name">${c.item_name}</td>
+          <td class="atb-route">${c.city}</td>
+          <td>${Math.round(c.precio_oro).toLocaleString('es-CO')}</td>
+          <td>${c.cantidad}</td>
+          <td>${Math.round(total).toLocaleString('es-CO')}</td>
+          <td style="font-size:11px; color:var(--text-muted);">${c.nota || ''}</td>
+          <td>
+            ${activa ? `<button class="atb-btn atb-compra-vender-btn" style="padding:5px 10px; font-size:11px;" data-id="${c.id}">Marcar vendido</button>` : ''}
+            <button class="atb-event-del atb-compra-del" data-id="${c.id}">Borrar</button>
+          </td>
+        </tr>`;
+    }
+
+    const resumenCiudades = Object.entries(porCiudad)
+      .map(([city, items]) => `<span class="atb-badge" style="margin:2px 4px 2px 0;">${city}: ${items.length}</span>`)
+      .join('') || '<span style="color:var(--text-muted); font-size:12px;">Nada pendiente todavía.</span>';
+
+    contentEl.innerHTML = `
+      <div class="atb-tip"><strong>Tip:</strong> registra la compra apenas la hagas, con el precio real que pagaste y en qué ciudad quedó — así cuando estés comerciando en otro lado y se te olvide dónde tenías stock, lo consultas aquí en vez de adivinar.</div>
+
+      <div class="atb-event-form">
+        <div class="atb-field"><label for="atb-compra-item">Item</label><select id="atb-compra-item">${itemOptions}</select></div>
+        <div class="atb-field"><label for="atb-compra-city">Ciudad (dónde quedó)</label><select id="atb-compra-city">${cityOptions}</select></div>
+        <div class="atb-field"><label for="atb-compra-precio">Precio pagado (oro, c/u)</label><input type="number" id="atb-compra-precio" min="0"></div>
+        <div class="atb-field"><label for="atb-compra-cantidad">Cantidad</label><input type="number" id="atb-compra-cantidad" value="1" min="1"></div>
+        <div class="atb-field" style="grid-column: span 2;"><label for="atb-compra-nota">Nota (opcional)</label><input type="text" id="atb-compra-nota" placeholder="ej. para craftear, para vender en Caerleon..."></div>
+        <button class="atb-btn" id="atb-compra-add">Agregar compra</button>
+      </div>
+
+      <div style="margin: 14px 0;">
+        <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:6px;">Stock pendiente por ciudad</p>
+        ${resumenCiudades}
+      </div>
+
+      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
+        Pendientes (${pendientes.length}) · ${Math.round(totalInvertido).toLocaleString('es-CO')} plata invertida
+      </p>
+      <table class="atb-table"><thead><tr><th>Item</th><th>Ciudad</th><th>Precio c/u</th><th>Cant.</th><th>Total</th><th>Nota</th><th></th></tr></thead>
+      <tbody>${pendientes.map(c => rowFor(c, true)).join('') || '<tr><td colspan="7" class="atb-empty">Sin compras pendientes.</td></tr>'}</tbody></table>
+
+      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:18px 0 8px;">Vendidas (${vendidas.length})</p>
+      <table class="atb-table"><thead><tr><th>Item</th><th>Ciudad</th><th>Precio c/u</th><th>Cant.</th><th>Total</th><th>Nota</th><th></th></tr></thead>
+      <tbody>${vendidas.map(c => rowFor(c, false)).join('') || '<tr><td colspan="7" class="atb-empty">Todavía ninguna marcada como vendida.</td></tr>'}</tbody></table>
+    `;
+
+    document.getElementById('atb-compra-add').addEventListener('click', async () => {
+      const precio_oro = Number(document.getElementById('atb-compra-precio').value);
+      if (!precio_oro) return;
+      await fetch('/api/compras', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_id: document.getElementById('atb-compra-item').value,
+          city: document.getElementById('atb-compra-city').value,
+          precio_oro,
+          cantidad: Number(document.getElementById('atb-compra-cantidad').value) || 1,
+          nota: document.getElementById('atb-compra-nota').value.trim(),
+        }),
+      });
+      renderCompras();
+    });
+
+    contentEl.querySelectorAll('.atb-compra-vender-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch('/api/compras/' + btn.dataset.id + '/vender', { method: 'POST' });
+        renderCompras();
+      });
+    });
+    contentEl.querySelectorAll('.atb-compra-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch('/api/compras/' + btn.dataset.id, { method: 'DELETE' });
+        renderCompras();
       });
     });
   }
@@ -1023,6 +1131,22 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
