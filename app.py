@@ -546,6 +546,42 @@ def api_ordenes_delete(orden_id):
     return jsonify({"deleted": True})
 
 
+@app.route("/api/compras", methods=["GET", "POST"])
+def api_compras():
+    if request.method == "POST":
+        body = request.get_json()
+        item = ITEMS_BY_ID.get(body["item_id"])
+        if not item:
+            return jsonify({"error": "item no reconocido"}), 400
+        nueva = {
+            "item_id": item["id"],
+            "item_name": item["name"],
+            "city": body["city"],
+            "precio_oro": body["precio_oro"],
+            "cantidad": body.get("cantidad", 1),
+            "nota": body.get("nota") or None,
+        }
+        res = supabase.table("compras_manual").insert(nueva).execute()
+        return jsonify(res.data), 201
+    res = supabase.table("compras_manual").select("*").order("fecha_creacion", desc=True).execute()
+    return jsonify(res.data)
+
+
+@app.route("/api/compras/<int:compra_id>/vender", methods=["POST"])
+def api_compras_vender(compra_id):
+    res = supabase.table("compras_manual").update({
+        "vendido": True,
+        "fecha_vendida": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", compra_id).execute()
+    return jsonify(res.data)
+
+
+@app.route("/api/compras/<int:compra_id>", methods=["DELETE"])
+def api_compras_delete(compra_id):
+    supabase.table("compras_manual").delete().eq("id", compra_id).execute()
+    return jsonify({"deleted": True})
+
+
 @app.route("/api/perfil", methods=["GET", "POST"])
 def api_perfil():
     if request.method == "POST":
@@ -582,6 +618,19 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
