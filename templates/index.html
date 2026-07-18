@@ -50,10 +50,25 @@
   .atb-tab.active { color: var(--gold-bright); border-bottom-color: var(--gold); }
   .atb-tab:focus-visible { outline: 2px solid var(--gold); }
 
-  .atb-risk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .atb-risk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
   .atb-risk-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
-  .atb-risk-item input[type=range] { width: 90px; accent-color: var(--gold); }
+  .atb-risk-item input[type=range] { width: 80px; accent-color: var(--gold); }
+  .atb-risk-value { font-family: 'IBM Plex Mono', monospace; font-size: 12px; width: 34px; text-align: center; background: var(--panel-raised); border: 1px solid var(--hairline); color: var(--text); padding: 3px 2px; border-radius: 4px; flex-shrink: 0; }
+  .atb-risk-value:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+  .atb-risk-controls { display: flex; align-items: center; gap: 6px; }
   .atb-seal { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; flex-shrink: 0; }
+
+  .atb-dist-wrap { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 6px; }
+  table.atb-dist-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.atb-dist-table th, table.atb-dist-table td { padding: 6px 8px; text-align: center; border: 1px solid var(--hairline); white-space: nowrap; }
+  table.atb-dist-table thead th { background: var(--panel-raised); color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; cursor: help; }
+  table.atb-dist-table th.atb-row-head { text-align: left; background: var(--panel-raised); color: var(--text); font-family: 'Inter', sans-serif; font-weight: 600; font-size: 12px; text-transform: none; letter-spacing: normal; }
+  table.atb-dist-table td.atb-dist-empty { background: rgba(255,255,255,0.015); }
+  table.atb-dist-table input[type=number] {
+    width: 54px; text-align: center; background: var(--panel-raised); border: 1px solid var(--hairline); color: var(--text);
+    padding: 4px 2px; border-radius: 4px; font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  }
+  table.atb-dist-table input[type=number]:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
 
   table.atb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
   table.atb-table th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); padding: 8px 10px; border-bottom: 1px solid var(--hairline); font-weight: 600; }
@@ -174,7 +189,9 @@
       No lo calculamos automáticamente porque el trazado de rutas puede cambiar con
       actualizaciones del mapa — mejor un dato tuyo real que uno adivinado.
     </p>
-    <div class="atb-risk-grid" id="atb-distance-grid"></div>
+    <div class="atb-dist-wrap">
+      <table class="atb-dist-table" id="atb-distance-grid"></table>
+    </div>
   </div>
 
   <div class="atb-tabs">
@@ -223,24 +240,47 @@
     return [cityAId, cityBId].sort().join('|');
   }
 
+  const CITY_ABBR = {
+    Caerleon: 'CAE', Bridgewatch: 'BW', Martlock: 'MAR', Lymhurst: 'LYM',
+    FortSterling: 'FS', Thetford: 'THE', Brecilien: 'BRE',
+  };
+
   function buildDistanceGrid() {
-    const gridEl = document.getElementById('atb-distance-grid');
-    gridEl.innerHTML = '';
-    for (let i = 0; i < CITIES.length; i++) {
-      for (let j = i + 1; j < CITIES.length; j++) {
-        const a = CITIES[i], b = CITIES[j];
+    const tableEl = document.getElementById('atb-distance-grid');
+    tableEl.innerHTML = '';
+
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    let headHtml = '<th></th>';
+    for (let j = 1; j < CITIES.length; j++) {
+      const c = CITIES[j];
+      headHtml += `<th title="${c.name}">${CITY_ABBR[c.id] || c.name.slice(0, 3).toUpperCase()}</th>`;
+    }
+    headRow.innerHTML = headHtml;
+    thead.appendChild(headRow);
+    tableEl.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    for (let i = 0; i < CITIES.length - 1; i++) {
+      const a = CITIES[i];
+      const row = document.createElement('tr');
+      let rowHtml = `<th class="atb-row-head">${a.name}</th>`;
+      for (let j = 1; j < CITIES.length; j++) {
+        if (j <= i) {
+          rowHtml += '<td class="atb-dist-empty"></td>';
+          continue;
+        }
+        const b = CITIES[j];
         const key = distanceKey(a.id, b.id);
         const val = distancias[key] ?? '';
-        const row = document.createElement('div');
-        row.className = 'atb-risk-item';
-        row.innerHTML = `
-          <span style="font-size:11px;">${a.name}<span class="arrow" style="color:var(--gold); margin:0 4px;">↔</span>${b.name}</span>
-          <input type="number" min="0" step="1" placeholder="min" style="width:60px; background:var(--panel-raised); border:1px solid var(--hairline); color:var(--text); padding:4px 6px; border-radius:4px; font-family:'IBM Plex Mono',monospace; font-size:12px;" value="${val}" data-key="${key}">
-        `;
-        gridEl.appendChild(row);
+        rowHtml += `<td><input type="number" min="0" step="1" placeholder="—" value="${val}" data-key="${key}" title="${a.name} ↔ ${b.name} (min)"></td>`;
       }
+      row.innerHTML = rowHtml;
+      tbody.appendChild(row);
     }
-    gridEl.querySelectorAll('input[type=number]').forEach(inp => {
+    tableEl.appendChild(tbody);
+
+    tableEl.querySelectorAll('input[type=number]').forEach(inp => {
       inp.addEventListener('change', e => {
         const v = Number(e.target.value);
         if (v > 0) distancias[e.target.dataset.key] = v;
@@ -274,15 +314,39 @@
       row.className = 'atb-risk-item';
       row.innerHTML = `
         <span><span class="atb-seal" style="background:${riskColor(val)}"></span>${c.name}</span>
-        <input type="range" min="0" max="100" value="${val}" data-city="${c.id}">
+        <span class="atb-risk-controls">
+          <input type="range" min="1" max="100" value="${val}" data-city="${c.id}">
+          <input type="number" class="atb-risk-value" min="1" max="100" step="1" value="${val}" data-city="${c.id}">
+        </span>
       `;
       riskGridEl.appendChild(row);
     });
-    riskGridEl.querySelectorAll('input[type=range]').forEach(inp => {
-      inp.addEventListener('input', e => {
-        riskValues[e.target.dataset.city] = Number(e.target.value);
-        const seal = e.target.previousElementSibling.querySelector('.atb-seal');
-        seal.style.background = riskColor(riskValues[e.target.dataset.city]);
+
+    function applyRisk(cityId, value, seal) {
+      const v = Math.min(100, Math.max(1, Math.round(value)));
+      riskValues[cityId] = v;
+      seal.style.background = riskColor(v);
+      return v;
+    }
+
+    riskGridEl.querySelectorAll('.atb-risk-item').forEach(row => {
+      const seal = row.querySelector('.atb-seal');
+      const rangeInp = row.querySelector('input[type=range]');
+      const numberInp = row.querySelector('input[type=number]');
+      rangeInp.addEventListener('input', e => {
+        const v = applyRisk(e.target.dataset.city, Number(e.target.value), seal);
+        numberInp.value = v;
+        if (lastRows.length) render();
+      });
+      numberInp.addEventListener('input', e => {
+        if (e.target.value === '') return;
+        const v = applyRisk(e.target.dataset.city, Number(e.target.value), seal);
+        rangeInp.value = v;
+      });
+      numberInp.addEventListener('change', e => {
+        const v = applyRisk(e.target.dataset.city, Number(e.target.value) || 1, seal);
+        numberInp.value = v;
+        rangeInp.value = v;
         if (lastRows.length) render();
       });
     });
@@ -927,6 +991,13 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
 
 
 
