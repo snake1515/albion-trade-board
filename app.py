@@ -138,6 +138,46 @@ SERVER_HOSTS = {
 ITEMS_BY_ID = {i["id"]: i for i in ITEMS}
 CITIES_BY_ID = {c["id"]: c for c in CITIES}
 
+# ---------------------------------------------------------------------------
+# Recolección: bonus de ciudad por recurso.
+#
+# HONESTIDAD SOBRE ESTOS DATOS: esto sale de la wiki de Albion Online y de
+# guías de comunidad consultadas en julio 2026, NO de un dump oficial del
+# juego. Si un parche cambia estos bonus, hay que actualizar esto a mano.
+#
+# Dos cosas distintas que casi siempre son ciudades DIFERENTES:
+#   - "biome"  -> mejor ciudad para RECOLECTAR el recurso crudo (primaria =
+#                 más abundante en esa ciudad/zona, secundaria y terciaria
+#                 también aparecen pero menos).
+#   - "refino" -> mejor ciudad para REFINAR ese recurso (bonus de ~+40% de
+#                 retorno de material al refinar ahí).
+# Por diseño del juego casi nunca coinciden: recolectas en una ciudad y
+# conviene transportar y refinar/vender en otra.
+# ---------------------------------------------------------------------------
+RAW_RESOURCE_LABELS = {
+    "ORE": "Mineral",
+    "HIDE": "Cuero crudo",
+    "FIBER": "Fibra",
+    "WOOD": "Madera",
+    "ROCK": "Piedra",
+}
+
+GATHERING_BIOME = {
+    "ORE":   {"primaria": "FortSterling", "secundaria": "Martlock",    "terciaria": "Bridgewatch"},
+    "HIDE":  {"primaria": "Bridgewatch",  "secundaria": "Lymhurst",    "terciaria": "Thetford"},
+    "FIBER": {"primaria": "Thetford",     "secundaria": "Bridgewatch", "terciaria": "FortSterling"},
+    "WOOD":  {"primaria": "Lymhurst",     "secundaria": "Thetford",    "terciaria": "Martlock"},
+    "ROCK":  {"primaria": "Martlock",     "secundaria": "FortSterling","terciaria": "Lymhurst"},
+}
+
+REFINING_BONUS_CITY = {
+    "ORE": "Thetford",
+    "HIDE": "Martlock",
+    "FIBER": "Lymhurst",
+    "WOOD": "FortSterling",
+    "ROCK": "Bridgewatch",
+}
+
 # Monturas con uso real de transporte (cargan peso extra). IDs verificados contra
 # el catálogo de la API de Albion Online Data Project.
 MOUNTS = [
@@ -509,6 +549,9 @@ def index():
         weapons_json=json.dumps(WEAPON_TYPES),
         weapon_tips_json=json.dumps(WEAPON_TIPS),
         mounts_json=json.dumps(MOUNTS),
+        gathering_biome_json=json.dumps(GATHERING_BIOME),
+        refining_bonus_json=json.dumps(REFINING_BONUS_CITY),
+        raw_resource_labels_json=json.dumps(RAW_RESOURCE_LABELS),
     )
 
 
@@ -727,6 +770,337 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
