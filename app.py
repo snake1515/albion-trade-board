@@ -157,7 +157,7 @@ MOUNTS = [
     {"id": "T7_MOUNT_HORSE", "name": "Caballo", "tier": 7},
     {"id": "T8_MOUNT_HORSE", "name": "Caballo", "tier": 8},
     {"id": "T6_MOUNT_DIREWOLF", "name": "Huargo", "tier": 6},
-    {"id": "T5_MOUNT_COUGAR_KEEPER", "name": "Garra Veloz", "tier": 5},
+    {"id": "T5_MOUNT_COUGAR_KEEPER@1", "name": "Garra Veloz", "tier": 5},
 ]
 
 
@@ -727,6 +727,89 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
