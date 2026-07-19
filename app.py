@@ -85,23 +85,23 @@ ITEMS = [
     {"id": "T8_MAIN_HOLYSTAFF", "name": "Bastón sagrado T8", "tier": 8, "peso": 8.0},
 
     # --- Armaduras (piezas de torso, más pesadas) ---
-    {"id": "T4_ARMOR_PLATE_SET1", "name": "Armadura placa T4", "tier": 4, "peso": 7.0},
-    {"id": "T6_ARMOR_PLATE_SET1", "name": "Armadura placa T6", "tier": 6, "peso": 9.0},
-    {"id": "T8_ARMOR_PLATE_SET1", "name": "Armadura placa T8", "tier": 8, "peso": 11.0},
-    {"id": "T4_ARMOR_LEATHER_SET1", "name": "Armadura cuero T4", "tier": 4, "peso": 5.5},
-    {"id": "T6_ARMOR_LEATHER_SET1", "name": "Armadura cuero T6", "tier": 6, "peso": 7.0},
-    {"id": "T8_ARMOR_LEATHER_SET1", "name": "Armadura cuero T8", "tier": 8, "peso": 8.5},
-    {"id": "T4_ARMOR_CLOTH_SET1", "name": "Armadura tela T4", "tier": 4, "peso": 4.0},
-    {"id": "T6_ARMOR_CLOTH_SET1", "name": "Armadura tela T6", "tier": 6, "peso": 5.0},
-    {"id": "T8_ARMOR_CLOTH_SET1", "name": "Armadura tela T8", "tier": 8, "peso": 6.0},
+    {"id": "T4_ARMOR_PLATE_SET1", "name": "Armadura placa T4 (Soldado)", "tier": 4, "peso": 7.0},
+    {"id": "T6_ARMOR_PLATE_SET1", "name": "Armadura placa T6 (Soldado)", "tier": 6, "peso": 9.0},
+    {"id": "T8_ARMOR_PLATE_SET1", "name": "Armadura placa T8 (Soldado)", "tier": 8, "peso": 11.0},
+    {"id": "T4_ARMOR_LEATHER_SET1", "name": "Armadura cuero T4 (Soldado)", "tier": 4, "peso": 5.5},
+    {"id": "T6_ARMOR_LEATHER_SET1", "name": "Armadura cuero T6 (Soldado)", "tier": 6, "peso": 7.0},
+    {"id": "T8_ARMOR_LEATHER_SET1", "name": "Armadura cuero T8 (Soldado)", "tier": 8, "peso": 8.5},
+    {"id": "T4_ARMOR_CLOTH_SET1", "name": "Armadura tela T4 (Soldado)", "tier": 4, "peso": 4.0},
+    {"id": "T6_ARMOR_CLOTH_SET1", "name": "Armadura tela T6 (Soldado)", "tier": 6, "peso": 5.0},
+    {"id": "T8_ARMOR_CLOTH_SET1", "name": "Armadura tela T8 (Soldado)", "tier": 8, "peso": 6.0},
 
     # --- Cascos y botas (piezas más chicas, más livianas) ---
-    {"id": "T4_HEAD_PLATE_SET1", "name": "Casco placa T4", "tier": 4, "peso": 3.0},
-    {"id": "T6_HEAD_PLATE_SET1", "name": "Casco placa T6", "tier": 6, "peso": 3.8},
-    {"id": "T8_HEAD_PLATE_SET1", "name": "Casco placa T8", "tier": 8, "peso": 4.6},
-    {"id": "T4_SHOES_PLATE_SET1", "name": "Botas placa T4", "tier": 4, "peso": 3.0},
-    {"id": "T6_SHOES_PLATE_SET1", "name": "Botas placa T6", "tier": 6, "peso": 3.8},
-    {"id": "T8_SHOES_PLATE_SET1", "name": "Botas placa T8", "tier": 8, "peso": 4.6},
+    {"id": "T4_HEAD_PLATE_SET1", "name": "Casco placa T4 (Soldado)", "tier": 4, "peso": 3.0},
+    {"id": "T6_HEAD_PLATE_SET1", "name": "Casco placa T6 (Soldado)", "tier": 6, "peso": 3.8},
+    {"id": "T8_HEAD_PLATE_SET1", "name": "Casco placa T8 (Soldado)", "tier": 8, "peso": 4.6},
+    {"id": "T4_SHOES_PLATE_SET1", "name": "Botas placa T4 (Soldado)", "tier": 4, "peso": 3.0},
+    {"id": "T6_SHOES_PLATE_SET1", "name": "Botas placa T6 (Soldado)", "tier": 6, "peso": 3.8},
+    {"id": "T8_SHOES_PLATE_SET1", "name": "Botas placa T8 (Soldado)", "tier": 8, "peso": 4.6},
 
     # --- Consumibles (livianos, casi no varían por tier) ---
     {"id": "T4_POTION_HEAL", "name": "Poción de curación T4", "tier": 4, "peso": 0.6},
@@ -709,6 +709,20 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
