@@ -617,6 +617,7 @@ def api_compras():
         nueva = {
             "item_id": item["id"],
             "item_name": item["name"],
+            "city_compra": body.get("city_compra") or None,
             "city": body["city"],
             "precio_oro": body["precio_oro"],
             "cantidad": body.get("cantidad", 1),
@@ -709,6 +710,20 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
