@@ -536,6 +536,42 @@
     return { margin, marginPct, avgRisk, riskAdjScore, unidadesOptimas, gananciaViaje, tiempoMin, platasHora };
   }
 
+  // Evalúa si una compra pendiente sigue siendo rentable con los precios más recientes.
+  // Devuelve dos escenarios: venta instantánea (al mejor comprador) y venta listada (al precio de mercado).
+  function estadoRentabilidad(c) {
+    const rec = (lastRawData || []).find(r => r.item_id === c.item_id && r.city === c.city);
+    if (!rec || (!rec.sell_price_min && !rec.buy_price_max)) {
+      return { sinDatos: true, label: 'Sin datos de precio', detalle: 'Trae los últimos precios para poder evaluarla.' };
+    }
+    const tax = Number(document.getElementById('atb-tax').value) / 100;
+    const minMargin = Number(document.getElementById('atb-minmargin').value) || 0;
+    const precioPagado = Number(c.precio_oro);
+
+    function escenario(precioRef, fechaRef, nombre) {
+      if (!precioRef || precioRef <= 0) return { label: `${nombre}: sin dato`, color: 'var(--text-muted)' };
+      const neto = precioRef * (1 - tax);
+      const margen = neto - precioPagado;
+      const margenPct = precioPagado > 0 ? (margen / precioPagado) * 100 : 0;
+      const ageHours = fechaRef ? (Date.now() - new Date(fechaRef).getTime()) / 3600000 : null;
+      const edadTxt = ageHours != null ? (ageHours < 1 ? `${Math.round(ageHours * 60)} min` : `${ageHours.toFixed(1)} h`) : '?';
+      let color = '#d97a7a';
+      if (margen >= minMargin) color = '#7fc9a3';
+      else if (margen >= 0) color = '#e0a53a';
+      const signo = margen >= 0 ? '+' : '';
+      return {
+        label: `${nombre}: ${signo}${Math.round(margen).toLocaleString('es-CO')} (${margenPct.toFixed(1)}%)`,
+        color,
+        detalle: `ref. ${Math.round(precioRef).toLocaleString('es-CO')} · hace ${edadTxt}`,
+      };
+    }
+
+    return {
+      sinDatos: false,
+      instantanea: escenario(rec.buy_price_max, rec.buy_price_max_date, 'Venta instantánea'),
+      listada: escenario(rec.sell_price_min, rec.sell_price_min_date, 'Listando en venta'),
+    };
+  }
+
   function render() {
     if (activeTab === 'resumen') { renderResumen(); return; }
     if (activeTab === 'history') { renderHistory(); return; }
@@ -740,6 +776,15 @@
       const ruta = c.city_compra
         ? `${c.city_compra}<span style="color:var(--gold); margin:0 4px;">→</span>${c.city}`
         : c.city;
+      const estado = estadoRentabilidad(c);
+      const estadoCell = estado.sinDatos
+        ? `<div style="color:var(--text-muted); font-size:11px;">${estado.label}<br>${estado.detalle}</div>`
+        : `
+          <div style="color:${estado.instantanea.color}; font-weight:600; font-size:11px;">${estado.instantanea.label}</div>
+          <div style="color:var(--text-muted); font-size:10px; margin-bottom:4px;">${estado.instantanea.detalle || ''}</div>
+          <div style="color:${estado.listada.color}; font-weight:600; font-size:11px;">${estado.listada.label}</div>
+          <div style="color:var(--text-muted); font-size:10px;">${estado.listada.detalle || ''}</div>
+        `;
       return `
         <tr>
           <td class="atb-item-name">${c.item_name}</td>
@@ -748,6 +793,7 @@
           <td>${c.cantidad}</td>
           <td>${Math.round(total).toLocaleString('es-CO')}</td>
           <td style="font-size:11px; color:var(--text-muted);">${c.nota || ''}</td>
+          <td>${estadoCell}</td>
           <td><input type="number" class="atb-compra-precio-venta" data-id="${c.id}" min="0" placeholder="c/u" style="width:90px;"></td>
           <td>
             <button class="atb-btn atb-compra-vender-btn" style="padding:5px 10px; font-size:11px;" data-id="${c.id}">Marcar vendido</button>
@@ -815,8 +861,8 @@
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
         Pendientes (${pendientes.length}) · ${Math.round(totalInvertido).toLocaleString('es-CO')} plata invertida
       </p>
-      <table class="atb-table"><thead><tr><th>Item</th><th>Ruta (compra → actual)</th><th>Precio c/u</th><th>Cant.</th><th>Total</th><th>Nota</th><th>Precio venta (c/u)</th><th></th></tr></thead>
-      <tbody>${pendientes.map(c => rowPendiente(c)).join('') || '<tr><td colspan="8" class="atb-empty">Sin compras pendientes.</td></tr>'}</tbody></table>
+      <table class="atb-table"><thead><tr><th>Item</th><th>Ruta (compra → actual)</th><th>Precio c/u</th><th>Cant.</th><th>Total</th><th>Nota</th><th>Estado</th><th>Precio venta (c/u)</th><th></th></tr></thead>
+      <tbody>${pendientes.map(c => rowPendiente(c)).join('') || '<tr><td colspan="9" class="atb-empty">Sin compras pendientes.</td></tr>'}</tbody></table>
 
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:22px 0 8px;">Ganancias y pérdidas (solo lo vendido)</p>
       <div class="atb-summary-grid">
@@ -1393,6 +1439,154 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
