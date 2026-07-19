@@ -136,6 +136,28 @@ SERVER_HOSTS = {
 ITEMS_BY_ID = {i["id"]: i for i in ITEMS}
 CITIES_BY_ID = {c["id"]: c for c in CITIES}
 
+# Monturas con uso real de transporte (cargan peso extra). IDs verificados contra
+# el catálogo de la API de Albion Online Data Project.
+MOUNTS = [
+    {"id": "T3_MOUNT_OX", "name": "Buey", "tier": 3},
+    {"id": "T4_MOUNT_OX", "name": "Buey", "tier": 4},
+    {"id": "T5_MOUNT_OX", "name": "Buey", "tier": 5},
+    {"id": "T6_MOUNT_OX", "name": "Buey", "tier": 6},
+    {"id": "T7_MOUNT_OX", "name": "Buey", "tier": 7},
+    {"id": "T8_MOUNT_OX", "name": "Buey", "tier": 8},
+    {"id": "T8_MOUNT_MAMMOTH_TRANSPORT", "name": "Mamut", "tier": 8},
+    {"id": "T4_MOUNT_GIANTSTAG", "name": "Ciervo Gigante", "tier": 4},
+    {"id": "T6_MOUNT_GIANTSTAG_MOOSE", "name": "Alce", "tier": 6},
+    {"id": "T3_MOUNT_HORSE", "name": "Caballo", "tier": 3},
+    {"id": "T4_MOUNT_HORSE", "name": "Caballo", "tier": 4},
+    {"id": "T5_MOUNT_HORSE", "name": "Caballo", "tier": 5},
+    {"id": "T6_MOUNT_HORSE", "name": "Caballo", "tier": 6},
+    {"id": "T7_MOUNT_HORSE", "name": "Caballo", "tier": 7},
+    {"id": "T8_MOUNT_HORSE", "name": "Caballo", "tier": 8},
+    {"id": "T6_MOUNT_DIREWOLF", "name": "Huargo", "tier": 6},
+    {"id": "T5_MOUNT_COUGAR_KEEPER", "name": "Garra Veloz", "tier": 5},
+]
+
 
 def unidades_optimas(peso_item_kg, capacidad_kg):
     if not peso_item_kg or peso_item_kg <= 0 or not capacidad_kg:
@@ -380,6 +402,38 @@ def fetch_and_store_prices():
         print(f"Guardados {len(rows)} registros de precios.")
         compute_and_store_margins(rows, cfg)
 
+    fetch_and_store_mount_prices(host)
+
+
+def fetch_and_store_mount_prices(host):
+    """Trae precios de las monturas de transporte (Buey, Mamut, Ciervo Gigante, Alce, Caballo).
+    Se corre junto al fetch principal (mismo cron cada hora / mismo botón manual)."""
+    item_ids = ",".join(m["id"] for m in MOUNTS)
+    city_names = ",".join(c["id"] for c in CITIES)
+    url = f"https://{host}/api/v2/stats/prices/{item_ids}.json?locations={city_names}&qualities=1"
+
+    try:
+        res = requests.get(url, timeout=30)
+        res.raise_for_status()
+        data = res.json()
+    except Exception as e:
+        print(f"Error consultando AODP (monturas): {e}")
+        return
+
+    rows = []
+    for rec in data:
+        rows.append({
+            "item_id": rec["item_id"],
+            "city": rec["city"],
+            "sell_price_min": rec.get("sell_price_min") or None,
+            "sell_price_min_date": rec.get("sell_price_min_date") or None,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    if rows:
+        supabase.table("precios_monturas").upsert(rows, on_conflict="item_id,city").execute()
+        print(f"Guardados {len(rows)} registros de precios de monturas.")
+
 
 def compute_and_store_margins(rows, cfg):
     """Calcula el mejor margen por item con la config actual y lo guarda en el historial."""
@@ -452,7 +506,14 @@ def index():
         cities_json=json.dumps(CITIES),
         weapons_json=json.dumps(WEAPON_TYPES),
         weapon_tips_json=json.dumps(WEAPON_TIPS),
+        mounts_json=json.dumps(MOUNTS),
     )
+
+
+@app.route("/api/monturas")
+def api_monturas():
+    res = supabase.table("precios_monturas").select("*").execute()
+    return jsonify(res.data)
 
 
 @app.route("/api/precios")
@@ -648,6 +709,20 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
