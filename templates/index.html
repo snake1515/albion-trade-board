@@ -232,6 +232,7 @@
     <button class="atb-tab" data-tab="history">Historial</button>
     <button class="atb-tab" data-tab="events">Eventos</button>
     <button class="atb-tab" data-tab="builds">Builds de farmeo</button>
+    <button class="atb-tab" data-tab="recoleccion">Recolección</button>
   </div>
 
   <div class="atb-panel">
@@ -254,6 +255,9 @@
   const MOUNTS = {{ mounts_json | safe }};
   let lastMountData = [];
   const WEAPON_TIPS = {{ weapon_tips_json | safe }};
+  const GATHERING_BIOME = {{ gathering_biome_json | safe }};
+  const REFINING_BONUS_CITY = {{ refining_bonus_json | safe }};
+  const RAW_RESOURCE_LABELS = {{ raw_resource_labels_json | safe }};
 
   const statusEl = document.getElementById('atb-status');
   const contentEl = document.getElementById('atb-content');
@@ -602,6 +606,7 @@
     if (activeTab === 'compras') { renderCompras(); return; }
     if (activeTab === 'viajes') { renderViajes(); return; }
     if (activeTab === 'builds') { renderBuilds(); return; }
+    if (activeTab === 'recoleccion') { renderRecoleccion(); return; }
     if (!lastRows.length) {
       contentEl.innerHTML = '<div class="atb-empty">Todavía no hay precios guardados. Dale clic a "Traer últimos precios" para la primera carga (el cron automático corre cada hora).</div>';
       return;
@@ -1242,6 +1247,106 @@
     });
   }
 
+  async function renderRecoleccion() {
+    contentEl.innerHTML = '<div class="atb-empty">Cargando perfil y precios...</div>';
+    const [perfilRes, preciosRes] = await Promise.all([fetch('/api/perfil'), fetch('/api/precios')]);
+    const perfil = await perfilRes.json();
+    const precios = await preciosRes.json();
+    const maestrias = perfil.maestria_recoleccion || {};
+
+    const RAW_KEYS = Object.keys(RAW_RESOURCE_LABELS);
+
+    const maestriaInputs = RAW_KEYS.map(k => `
+      <div class="atb-field">
+        <label for="atb-mst-rec-${k}">${RAW_RESOURCE_LABELS[k]}</label>
+        <input type="number" id="atb-mst-rec-${k}" min="0" max="100" value="${maestrias[k] ?? 0}">
+      </div>`).join('');
+
+    // Filas: un item crudo (T4/T6/T8 de cada recurso) por fila. Se identifica
+    // por el sufijo del id (T4_ORE, T6_HIDE, etc.) contra RAW_RESOURCE_LABELS.
+    const filas = [];
+    ITEMS.forEach(item => {
+      const partes = item.id.split('_');
+      const recurso = partes.slice(1).join('_');
+      if (!RAW_RESOURCE_LABELS[recurso]) return;
+
+      const biome = GATHERING_BIOME[recurso];
+      const ciudadRefino = REFINING_BONUS_CITY[recurso];
+      const precioRefino = precios.find(p => p.item_id === item.id && p.city === ciudadRefino);
+      const precioVenta = precioRefino ? Number(precioRefino.buy_price_max || 0) : 0;
+
+      const maestria = Number(maestrias[recurso] || 0);
+      const riesgoRecoleccion = riskValues[biome.primaria] ?? 30;
+
+      // Score: aproximación propia, NO es la fórmula exacta del juego.
+      // Bono de maestría hasta +40% (tope arbitrario, el real depende de tu
+      // árbol de especialización) y penalización por riesgo de la zona
+      // igual al criterio que ya usas en "Por ruta" (riesgo/150).
+      const bonoMaestria = 1 + (maestria / 100) * 0.4;
+      const factorRiesgo = 1 - (riesgoRecoleccion / 150);
+      const score = precioVenta * bonoMaestria * factorRiesgo;
+
+      filas.push({
+        item, recurso, biome, ciudadRefino, precioVenta, riesgoRecoleccion, score,
+        fecha: precioRefino ? precioRefino.sell_price_min_date : null,
+      });
+    });
+
+    filas.sort((a, b) => b.score - a.score);
+
+    const cityLabel = id => (CITIES.find(c => c.id === id) || {}).name || id;
+
+    const filasHtml = filas.map(f => `
+      <tr>
+        <td>${RAW_RESOURCE_LABELS[f.recurso]}</td>
+        <td><span class="atb-tier-pill">T${f.item.tier}</span></td>
+        <td>${cityLabel(f.biome.primaria)}</td>
+        <td>${cityLabel(f.ciudadRefino)}</td>
+        <td>${f.precioVenta ? f.precioVenta.toLocaleString('es-CO') : '—'}</td>
+        <td>${f.riesgoRecoleccion}</td>
+        <td><strong>${f.score ? Math.round(f.score).toLocaleString('es-CO') : '—'}</strong></td>
+      </tr>`).join('');
+
+    contentEl.innerHTML = `
+      <div class="atb-tip"><strong>Cómo leer esto:</strong> "Recolectar en" es la ciudad/bioma donde ese material es más abundante.
+      "Refinar/vender en" es la ciudad con el bonus de refino de ese material — casi nunca es la misma ciudad, así que hay transporte de por medio.
+      El puntaje combina el precio actual, tu maestría y el riesgo de la zona de recolección — es una guía, no una promesa de ganancia.</div>
+
+      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">Tu maestría por recurso (0-100)</p>
+      <div class="atb-risk-grid" style="margin-bottom:12px;">${maestriaInputs}</div>
+      <button class="atb-btn" id="atb-rec-save" style="margin-bottom:22px;">Guardar maestría</button>
+
+      <p class="atb-section-label">Materiales ordenados por rentabilidad estimada de recolección</p>
+      <div class="atb-scroll">
+        <table class="atb-table">
+          <thead>
+            <tr>
+              <th>Recurso</th><th>Tier</th><th>Recolectar en</th><th>Refinar/vender en</th>
+              <th>Precio actual</th><th>Riesgo zona</th><th>Puntaje</th>
+            </tr>
+          </thead>
+          <tbody>${filasHtml || '<tr><td colspan="7">Sin datos de precios todavía — usa "Traer últimos precios".</td></tr>'}</tbody>
+        </table>
+      </div>
+
+      <p style="font-size:11px; color:var(--text-muted); margin-top:14px; line-height:1.5;">
+        El bono de maestría (hasta +40%) y la penalización por riesgo son una aproximación mía para ordenar los materiales,
+        no la fórmula exacta del juego — tu rendimiento real depende también de tu árbol de especialización, equipo de recolección y buffs activos.
+      </p>
+    `;
+
+    document.getElementById('atb-rec-save').addEventListener('click', async () => {
+      const maestria_recoleccion = {};
+      RAW_KEYS.forEach(k => { maestria_recoleccion[k] = Number(document.getElementById('atb-mst-rec-' + k).value) || 0; });
+      await fetch('/api/perfil', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maestria_recoleccion }),
+      });
+      renderRecoleccion();
+    });
+  }
+
   async function renderResumen() {
     contentEl.innerHTML = '<div class="atb-empty">Comparando los 3 métodos...</div>';
     const maxStale = Number(document.getElementById('atb-maxstale').value);
@@ -1464,6 +1569,598 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
