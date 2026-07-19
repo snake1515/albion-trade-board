@@ -631,9 +631,24 @@ def api_compras():
 
 @app.route("/api/compras/<int:compra_id>/vender", methods=["POST"])
 def api_compras_vender(compra_id):
+    body = request.get_json(silent=True) or {}
+    precio_venta = body.get("precio_venta")
+    if precio_venta is None:
+        return jsonify({"error": "precio_venta requerido"}), 400
+
+    actual = supabase.table("compras_manual").select("*").eq("id", compra_id).single().execute()
+    if not actual.data:
+        return jsonify({"error": "no encontrada"}), 404
+
+    precio_oro = float(actual.data["precio_oro"])
+    cantidad = float(actual.data["cantidad"])
+    ganancia = round((float(precio_venta) - precio_oro) * cantidad, 2)
+
     res = supabase.table("compras_manual").update({
         "vendido": True,
         "fecha_vendida": datetime.now(timezone.utc).isoformat(),
+        "precio_venta": precio_venta,
+        "ganancia": ganancia,
     }).eq("id", compra_id).execute()
     return jsonify(res.data)
 
@@ -710,6 +725,89 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
