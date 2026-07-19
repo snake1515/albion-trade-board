@@ -735,7 +735,7 @@
       porCiudad[c.city].push(c);
     });
 
-    function rowFor(c, activa) {
+    function rowPendiente(c) {
       const total = Number(c.precio_oro) * Number(c.cantidad);
       const ruta = c.city_compra
         ? `${c.city_compra}<span style="color:var(--gold); margin:0 4px;">→</span>${c.city}`
@@ -748,16 +748,51 @@
           <td>${c.cantidad}</td>
           <td>${Math.round(total).toLocaleString('es-CO')}</td>
           <td style="font-size:11px; color:var(--text-muted);">${c.nota || ''}</td>
+          <td><input type="number" class="atb-compra-precio-venta" data-id="${c.id}" min="0" placeholder="c/u" style="width:90px;"></td>
           <td>
-            ${activa ? `<button class="atb-btn atb-compra-vender-btn" style="padding:5px 10px; font-size:11px;" data-id="${c.id}">Marcar vendido</button>` : ''}
+            <button class="atb-btn atb-compra-vender-btn" style="padding:5px 10px; font-size:11px;" data-id="${c.id}">Marcar vendido</button>
             <button class="atb-event-del atb-compra-del" data-id="${c.id}">Borrar</button>
           </td>
+        </tr>`;
+    }
+
+    function rowVendida(c) {
+      const totalCompra = Number(c.precio_oro) * Number(c.cantidad);
+      const precioVenta = c.precio_venta != null ? Number(c.precio_venta) : null;
+      const totalVenta = precioVenta != null ? precioVenta * Number(c.cantidad) : null;
+      const ganancia = c.ganancia != null ? Number(c.ganancia) : (totalVenta != null ? totalVenta - totalCompra : null);
+      const ruta = c.city_compra
+        ? `${c.city_compra}<span style="color:var(--gold); margin:0 4px;">→</span>${c.city}`
+        : c.city;
+      const gananciaCell = ganancia != null
+        ? `<td style="color:${ganancia >= 0 ? '#7fc9a3' : '#d97a7a'}; font-weight:600;">${ganancia >= 0 ? '+' : ''}${Math.round(ganancia).toLocaleString('es-CO')}</td>`
+        : `<td style="color:var(--text-muted);">—</td>`;
+      return `
+        <tr>
+          <td class="atb-item-name">${c.item_name}</td>
+          <td class="atb-route">${ruta}</td>
+          <td>${Math.round(c.precio_oro).toLocaleString('es-CO')}</td>
+          <td>${precioVenta != null ? Math.round(precioVenta).toLocaleString('es-CO') : '—'}</td>
+          <td>${c.cantidad}</td>
+          <td>${Math.round(totalCompra).toLocaleString('es-CO')}</td>
+          <td>${totalVenta != null ? Math.round(totalVenta).toLocaleString('es-CO') : '—'}</td>
+          ${gananciaCell}
+          <td style="font-size:11px; color:var(--text-muted);">${c.nota || ''}</td>
+          <td><button class="atb-event-del atb-compra-del" data-id="${c.id}">Borrar</button></td>
         </tr>`;
     }
 
     const resumenCiudades = Object.entries(porCiudad)
       .map(([city, items]) => `<span class="atb-badge" style="margin:2px 4px 2px 0;">${city}: ${items.length}</span>`)
       .join('') || '<span style="color:var(--text-muted); font-size:12px;">Nada pendiente todavía.</span>';
+
+    // Resumen de ganancias / pérdidas, calculado solo con lo ya vendido
+    const totalVendidoPlata = vendidas.reduce((sum, c) => sum + (c.precio_venta != null ? Number(c.precio_venta) * Number(c.cantidad) : 0), 0);
+    const totalInvertidoVendido = vendidas.reduce((sum, c) => sum + Number(c.precio_oro) * Number(c.cantidad), 0);
+    const gananciaNeta = vendidas.reduce((sum, c) => sum + (c.ganancia != null ? Number(c.ganancia) : 0), 0);
+    const roiPct = totalInvertidoVendido > 0 ? (gananciaNeta / totalInvertidoVendido * 100) : 0;
+    const ganadoras = vendidas.filter(c => c.ganancia != null && Number(c.ganancia) >= 0).length;
+    const perdedoras = vendidas.filter(c => c.ganancia != null && Number(c.ganancia) < 0).length;
 
     contentEl.innerHTML = `
       <div class="atb-tip"><strong>Tip:</strong> registra la compra apenas la hagas, con el precio real que pagaste, en qué ciudad la compraste y hacia dónde la vas a mover/vender — así cuando estés comerciando en otro lado y se te olvide dónde tenías stock, lo consultas aquí en vez de adivinar.</div>
@@ -780,12 +815,26 @@
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
         Pendientes (${pendientes.length}) · ${Math.round(totalInvertido).toLocaleString('es-CO')} plata invertida
       </p>
-      <table class="atb-table"><thead><tr><th>Item</th><th>Ruta (compra → actual)</th><th>Precio c/u</th><th>Cant.</th><th>Total</th><th>Nota</th><th></th></tr></thead>
-      <tbody>${pendientes.map(c => rowFor(c, true)).join('') || '<tr><td colspan="7" class="atb-empty">Sin compras pendientes.</td></tr>'}</tbody></table>
+      <table class="atb-table"><thead><tr><th>Item</th><th>Ruta (compra → actual)</th><th>Precio c/u</th><th>Cant.</th><th>Total</th><th>Nota</th><th>Precio venta (c/u)</th><th></th></tr></thead>
+      <tbody>${pendientes.map(c => rowPendiente(c)).join('') || '<tr><td colspan="8" class="atb-empty">Sin compras pendientes.</td></tr>'}</tbody></table>
+
+      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:22px 0 8px;">Ganancias y pérdidas (solo lo vendido)</p>
+      <div class="atb-summary-grid">
+        <div class="atb-summary-card">
+          <h3>Ganancia / pérdida neta</h3>
+          <div class="atb-summary-value" style="color:${gananciaNeta >= 0 ? '#7fc9a3' : '#d97a7a'};">${gananciaNeta >= 0 ? '+' : ''}${Math.round(gananciaNeta).toLocaleString('es-CO')} plata</div>
+          <div class="atb-summary-sub">${ganadoras} venta(s) con ganancia · ${perdedoras} con pérdida</div>
+        </div>
+        <div class="atb-summary-card">
+          <h3>Retorno sobre lo vendido</h3>
+          <div class="atb-summary-value" style="color:${roiPct >= 0 ? '#7fc9a3' : '#d97a7a'};">${roiPct.toFixed(1)}%</div>
+          <div class="atb-summary-sub">${Math.round(totalInvertidoVendido).toLocaleString('es-CO')} invertido → ${Math.round(totalVendidoPlata).toLocaleString('es-CO')} recibido</div>
+        </div>
+      </div>
 
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:18px 0 8px;">Vendidas (${vendidas.length})</p>
-      <table class="atb-table"><thead><tr><th>Item</th><th>Ruta (compra → actual)</th><th>Precio c/u</th><th>Cant.</th><th>Total</th><th>Nota</th><th></th></tr></thead>
-      <tbody>${vendidas.map(c => rowFor(c, false)).join('') || '<tr><td colspan="7" class="atb-empty">Todavía ninguna marcada como vendida.</td></tr>'}</tbody></table>
+      <table class="atb-table"><thead><tr><th>Item</th><th>Ruta (compra → actual)</th><th>Precio compra c/u</th><th>Precio venta c/u</th><th>Cant.</th><th>Total compra</th><th>Total venta</th><th>Ganancia/Pérdida</th><th>Nota</th><th></th></tr></thead>
+      <tbody>${vendidas.map(c => rowVendida(c)).join('') || '<tr><td colspan="10" class="atb-empty">Todavía ninguna marcada como vendida.</td></tr>'}</tbody></table>
     `;
 
     document.getElementById('atb-compra-add').addEventListener('click', async () => {
@@ -808,7 +857,18 @@
 
     contentEl.querySelectorAll('.atb-compra-vender-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        await fetch('/api/compras/' + btn.dataset.id + '/vender', { method: 'POST' });
+        const id = btn.dataset.id;
+        const input = contentEl.querySelector(`.atb-compra-precio-venta[data-id="${id}"]`);
+        const precio_venta = Number(input ? input.value : 0);
+        if (!precio_venta || precio_venta <= 0) {
+          alert('Ingresa el precio de venta (c/u) antes de marcar como vendido.');
+          return;
+        }
+        await fetch('/api/compras/' + id + '/vender', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ precio_venta }),
+        });
         renderCompras();
       });
     });
@@ -1333,6 +1393,80 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
