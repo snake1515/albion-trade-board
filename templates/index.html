@@ -30,6 +30,11 @@
   .atb-title { font-family: 'Cinzel', serif; font-weight: 700; font-size: 26px; letter-spacing: 0.5px; color: var(--gold-bright); margin: 0; }
   .atb-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 4px; letter-spacing: 0.3px; }
   .atb-badge { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--teal); border: 1px solid var(--teal); padding: 4px 10px; border-radius: 3px; text-transform: uppercase; letter-spacing: 1px; }
+  .atb-rent-badge { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 4px; border: 1px solid; background: rgba(255,255,255,0.03); }
+  .atb-rent-ok { color: #7fc9a3; border-color: #7fc9a3; background: rgba(127,201,163,0.12); }
+  .atb-rent-warn { color: #e0a53a; border-color: #e0a53a; background: rgba(224,165,58,0.12); }
+  .atb-rent-bad { color: #d97a7a; border-color: #d97a7a; background: rgba(217,122,122,0.12); }
+  .atb-rent-unknown { color: var(--text-muted); border-color: var(--hairline); }
 
   .atb-panel { background: var(--panel); border: 1px solid var(--hairline); border-radius: 6px; padding: 18px; margin-bottom: 18px; }
   .atb-controls-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; align-items: end; }
@@ -548,19 +553,19 @@
     const precioPagado = Number(c.precio_oro);
 
     function escenario(precioRef, fechaRef, nombre) {
-      if (!precioRef || precioRef <= 0) return { label: `${nombre}: sin dato`, color: 'var(--text-muted)' };
+      if (!precioRef || precioRef <= 0) return { label: `${nombre}: sin dato`, cls: 'atb-rent-unknown' };
       const neto = precioRef * (1 - tax);
       const margen = neto - precioPagado;
       const margenPct = precioPagado > 0 ? (margen / precioPagado) * 100 : 0;
       const ageHours = fechaRef ? (Date.now() - new Date(fechaRef).getTime()) / 3600000 : null;
       const edadTxt = ageHours != null ? (ageHours < 1 ? `${Math.round(ageHours * 60)} min` : `${ageHours.toFixed(1)} h`) : '?';
-      let color = '#d97a7a';
-      if (margen >= minMargin) color = '#7fc9a3';
-      else if (margen >= 0) color = '#e0a53a';
+      let cls = 'atb-rent-bad';
+      if (margen >= minMargin) cls = 'atb-rent-ok';
+      else if (margen >= 0) cls = 'atb-rent-warn';
       const signo = margen >= 0 ? '+' : '';
       return {
         label: `${nombre}: ${signo}${Math.round(margen).toLocaleString('es-CO')} (${margenPct.toFixed(1)}%)`,
-        color,
+        cls,
         detalle: `ref. ${Math.round(precioRef).toLocaleString('es-CO')} · hace ${edadTxt}`,
       };
     }
@@ -780,10 +785,14 @@
       const estadoCell = estado.sinDatos
         ? `<div style="color:var(--text-muted); font-size:11px;">${estado.label}<br>${estado.detalle}</div>`
         : `
-          <div style="color:${estado.instantanea.color}; font-weight:600; font-size:11px;">${estado.instantanea.label}</div>
-          <div style="color:var(--text-muted); font-size:10px; margin-bottom:4px;">${estado.instantanea.detalle || ''}</div>
-          <div style="color:${estado.listada.color}; font-weight:600; font-size:11px;">${estado.listada.label}</div>
-          <div style="color:var(--text-muted); font-size:10px;">${estado.listada.detalle || ''}</div>
+          <div style="margin-bottom:6px;">
+            <span class="atb-rent-badge ${estado.instantanea.cls}">${estado.instantanea.label}</span>
+            <div style="color:var(--text-muted); font-size:10px; margin-top:2px;">${estado.instantanea.detalle || ''}</div>
+          </div>
+          <div>
+            <span class="atb-rent-badge ${estado.listada.cls}">${estado.listada.label}</span>
+            <div style="color:var(--text-muted); font-size:10px; margin-top:2px;">${estado.listada.detalle || ''}</div>
+          </div>
         `;
       return `
         <tr>
@@ -1439,6 +1448,154 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
