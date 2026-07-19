@@ -229,6 +229,8 @@
   const ITEMS = {{ items_json | safe }};
   const CITIES = {{ cities_json | safe }};
   const WEAPONS = {{ weapons_json | safe }};
+  const MOUNTS = {{ mounts_json | safe }};
+  let lastMountData = [];
   const WEAPON_TIPS = {{ weapon_tips_json | safe }};
 
   const statusEl = document.getElementById('atb-status');
@@ -431,12 +433,13 @@
     const hintEl = document.getElementById('atb-stale-hint');
     if (!hintEl) return;
     const now = Date.now();
+    const MAX_PLAUSIBLE_HOURS = 24 * 365 * 2; // 2 años — cualquier cosa más vieja que esto es una fecha sentinela (item nunca vendido), no un precio real desactualizado
     let minAge = null, maxAge = null;
     data.forEach(rec => {
       [rec.sell_price_min_date, rec.buy_price_max_date].forEach(d => {
         if (!d) return;
         const age = (now - new Date(d).getTime()) / 3600000;
-        if (!Number.isFinite(age) || age < 0) return;
+        if (!Number.isFinite(age) || age < 0 || age > MAX_PLAUSIBLE_HOURS) return;
         if (minAge === null || age < minAge) minAge = age;
         if (maxAge === null || age > maxAge) maxAge = age;
       });
@@ -828,10 +831,29 @@
     },
   };
 
+  function tierPricesHtml(mountName) {
+    const idsForMount = MOUNTS.filter(m => m.name === mountName);
+    if (!idsForMount.length) return '<span style="color:var(--text-muted);">No se rastrea (sin uso de carga).</span>';
+    if (!lastMountData.length) return '<span style="color:var(--text-muted);">Cargando…</span>';
+    const byTier = {};
+    idsForMount.forEach(m => {
+      const prices = lastMountData
+        .filter(r => r.item_id === m.id && r.sell_price_min > 0)
+        .map(r => r.sell_price_min);
+      if (prices.length) {
+        byTier[m.tier] = prices.reduce((a, b) => a + b, 0) / prices.length;
+      }
+    });
+    const tiers = Object.keys(byTier).sort((a, b) => a - b);
+    if (!tiers.length) return '<span style="color:var(--text-muted);">Sin precio guardado todavía.</span>';
+    return tiers.map(t => `<span style="white-space:nowrap; margin-right:10px;">T${t}: <strong>${Math.round(byTier[t]).toLocaleString('es-CO')}</strong></span>`).join('');
+  }
+
   async function renderViajes() {
     contentEl.innerHTML = '<div class="atb-empty">Cargando viajes...</div>';
-    const res = await fetch('/api/viajes');
-    const viajes = await res.json();
+    const [resViajes, resMonturas] = await Promise.all([fetch('/api/viajes'), fetch('/api/monturas')]);
+    const viajes = await resViajes.json();
+    lastMountData = await resMonturas.json();
 
     const cityOptions = CITIES.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
     const monturaOptions = ['Buey', 'Mamut', 'Ciervo Gigante', 'Alce', 'Caballo', 'Huargo', 'Garra Veloz', 'Otro']
@@ -860,12 +882,13 @@
       resumenHtml += '</tbody></table>';
     }
 
-    const mountRefHtml = `<table class="atb-table"><thead><tr><th>Montura</th><th>A favor</th><th>En contra</th></tr></thead><tbody>
+    const mountRefHtml = `<table class="atb-table"><thead><tr><th>Montura</th><th>A favor</th><th>En contra</th><th>Precio actual para reponer</th></tr></thead><tbody>
       ${Object.entries(MOUNT_INFO).filter(([m]) => m !== 'Otro').map(([m, info]) => `
         <tr>
           <td class="atb-item-name">${m}</td>
           <td class="atb-profit-pos" style="font-size:11.5px;">${info.pros}</td>
           <td class="atb-profit-neg" style="font-size:11.5px;">${info.contras}</td>
+          <td style="font-size:11.5px;">${tierPricesHtml(m)}</td>
         </tr>`).join('')}
     </tbody></table>`;
 
@@ -1279,6 +1302,14 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
 
 
 
