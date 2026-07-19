@@ -197,6 +197,7 @@
     <div class="atb-dist-wrap">
       <table class="atb-dist-table" id="atb-distance-grid"></table>
     </div>
+    <span class="atb-field-hint" id="atb-dist-save-hint" style="margin-top:8px;">Se guarda solo apenas escribes un valor.</span>
   </div>
 
   <div class="atb-tabs">
@@ -290,10 +291,27 @@
     tableEl.appendChild(tbody);
 
     tableEl.querySelectorAll('input[type=number]').forEach(inp => {
-      inp.addEventListener('change', e => {
+      inp.addEventListener('change', async e => {
         const v = Number(e.target.value);
         if (v > 0) distancias[e.target.dataset.key] = v;
         else delete distancias[e.target.dataset.key];
+
+        const hintEl = document.getElementById('atb-dist-save-hint');
+        if (hintEl) hintEl.textContent = 'Guardando...';
+        try {
+          await saveConfig();
+          if (hintEl) {
+            hintEl.textContent = '✓ Guardado';
+            hintEl.classList.add('atb-hint-warn');
+            setTimeout(() => {
+              hintEl.textContent = 'Se guarda solo apenas escribes un valor.';
+              hintEl.classList.remove('atb-hint-warn');
+            }, 2000);
+          }
+        } catch (err) {
+          if (hintEl) hintEl.textContent = '⚠ No se pudo guardar, revisa tu conexión e inténtalo de nuevo.';
+        }
+
         if (lastRows.length) render();
       });
     });
@@ -384,22 +402,30 @@
     buildDistanceGrid();
   }
 
-  document.getElementById('atb-save-config').addEventListener('click', async () => {
-    const btn = document.getElementById('atb-save-config');
-    btn.textContent = 'Guardando...';
+  function buildConfigPayload() {
+    return {
+      servidor: document.getElementById('atb-server').value,
+      impuesto: Number(document.getElementById('atb-tax').value),
+      margen_minimo: Number(document.getElementById('atb-minmargin').value),
+      max_antiguedad_horas: Number(document.getElementById('atb-maxstale').value),
+      riesgo_ciudades: riskValues,
+      capacidad_montura_kg: Number(document.getElementById('atb-mount-cap').value),
+      distancias_ciudades: distancias,
+    };
+  }
+
+  async function saveConfig() {
     await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        servidor: document.getElementById('atb-server').value,
-        impuesto: Number(document.getElementById('atb-tax').value),
-        margen_minimo: Number(document.getElementById('atb-minmargin').value),
-        max_antiguedad_horas: Number(document.getElementById('atb-maxstale').value),
-        riesgo_ciudades: riskValues,
-        capacidad_montura_kg: Number(document.getElementById('atb-mount-cap').value),
-        distancias_ciudades: distancias,
-      }),
+      body: JSON.stringify(buildConfigPayload()),
     });
+  }
+
+  document.getElementById('atb-save-config').addEventListener('click', async () => {
+    const btn = document.getElementById('atb-save-config');
+    btn.textContent = 'Guardando...';
+    await saveConfig();
     btn.textContent = 'Guardar configuración';
   });
 
@@ -1307,6 +1333,13 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
 
 
 
