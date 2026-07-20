@@ -178,6 +178,37 @@ REFINING_BONUS_CITY = {
     "ROCK": "Bridgewatch",
 }
 
+# Nombre real del material crudo en cada tier (T2-T8), según los datos del
+# juego (Albion Online 2D Database, consultado julio 2026). Esto es lo que
+# ves literalmente en tu inventario/mercado.
+GATHERING_TIER_NAMES = {
+    "WOOD":  {2: "Troncos de abedul", 3: "Troncos de castaño", 4: "Troncos de pino", 5: "Troncos de cedro", 6: "Troncos de roble rojo", 7: "Troncos de cortezaceniza", 8: "Troncos de maderablanca"},
+    "ORE":   {2: "Mineral de cobre", 3: "Mineral de estaño", 4: "Mineral de hierro", 5: "Mineral de titanio", 6: "Mineral de runita", 7: "Mineral de meteorito", 8: "Mineral de adamantio"},
+    "FIBER": {2: "Algodón", 3: "Lino", 4: "Cáñamo", 5: "Duranta", 6: "Algodón ambarino", 7: "Lino solar", 8: "Cáñamo fantasma"},
+    "HIDE":  {2: "Piel dura", 3: "Piel fina", 4: "Piel media", 5: "Piel pesada", 6: "Piel fornida", 7: "Piel gruesa", 8: "Piel resistente"},
+    "ROCK":  {2: "Piedra caliza", 3: "Arenisca", 4: "Travertino", 5: "Granito", 6: "Pizarra", 7: "Basalto", 8: "Mármol"},
+}
+
+# Zona mínima donde se suele encontrar cada tier en el mundo abierto. Esto es
+# consenso de guías de comunidad, NO una garantía exacta — el reparto real de
+# recursos varía por región del mapa y cambia con parches.
+GATHERING_TIER_ZONE = {
+    2: "Zona azul/verde", 3: "Zona azul/verde", 4: "Zona amarilla",
+    5: "Zona amarilla/roja", 6: "Zona roja", 7: "Zona roja/Yermos", 8: "Yermos (zona negra)",
+}
+
+# Consumibles de recolección más mencionados en guías de la comunidad. Sin
+# números exactos de bono porque Sandbox Interactive no publica una tabla
+# oficial verificable — es orientativo, no una promesa de rendimiento.
+GATHERING_CONSUMABLES = [
+    {"nombre": "Pastel de Cerdo", "tipo": "Comida", "efecto": "El más usado por recolectores: sube tu rendimiento de recolección y tu capacidad de carga durante 30 minutos."},
+    {"nombre": "Pastel de Pescado", "tipo": "Comida", "efecto": "Da más resistencia frente a otros jugadores y velocidad de recolección."},
+    {"nombre": "Pastel de Ojo Muerto Dos Picos", "tipo": "Comida", "efecto": "Ayuda contra control de multitudes y mejora el retorno de recursos — suele ser caro, a criterio propio."},
+    {"nombre": "Poción de Gigantismo Mayor", "tipo": "Poción", "efecto": "Aumenta capacidad de carga y vida máxima — útil para sacar más material por viaje."},
+    {"nombre": "Poción de Resistencia Mayor", "tipo": "Poción", "efecto": "Mejora tus defensas y resistencia a control de multitudes — para sobrevivir en zonas rojas/negras."},
+    {"nombre": "Poción de Invisibilidad", "tipo": "Poción", "efecto": "Te vuelve invisible unos segundos — para escapar si te detectan en zona peligrosa."},
+]
+
 # Monturas con uso real de transporte (cargan peso extra). IDs verificados contra
 # el catálogo de la API de Albion Online Data Project.
 MOUNTS = [
@@ -552,6 +583,9 @@ def index():
         gathering_biome_json=json.dumps(GATHERING_BIOME),
         refining_bonus_json=json.dumps(REFINING_BONUS_CITY),
         raw_resource_labels_json=json.dumps(RAW_RESOURCE_LABELS),
+        gathering_tier_names_json=json.dumps(GATHERING_TIER_NAMES),
+        gathering_tier_zone_json=json.dumps(GATHERING_TIER_ZONE),
+        gathering_consumables_json=json.dumps(GATHERING_CONSUMABLES),
     )
 
 
@@ -704,6 +738,34 @@ def api_compras_delete(compra_id):
     return jsonify({"deleted": True})
 
 
+@app.route("/api/recolecciones", methods=["GET", "POST"])
+def api_recolecciones():
+    if request.method == "POST":
+        body = request.get_json()
+        item = ITEMS_BY_ID.get(body["item_id"])
+        if not item:
+            return jsonify({"error": "item no reconocido"}), 400
+        nueva = {
+            "item_id": item["id"],
+            "item_name": item["name"],
+            "tier": item["tier"],
+            "cantidad": body.get("cantidad", 1),
+            "ciudad_zona": body.get("ciudad_zona") or None,
+            "precio_unitario": body.get("precio_unitario"),
+            "nota": body.get("nota") or None,
+        }
+        res = supabase.table("registro_recoleccion").insert(nueva).execute()
+        return jsonify(res.data), 201
+    res = supabase.table("registro_recoleccion").select("*").order("fecha_creacion", desc=True).execute()
+    return jsonify(res.data)
+
+
+@app.route("/api/recolecciones/<int:reg_id>", methods=["DELETE"])
+def api_recolecciones_delete(reg_id):
+    supabase.table("registro_recoleccion").delete().eq("id", reg_id).execute()
+    return jsonify({"deleted": True})
+
+
 @app.route("/api/viajes", methods=["GET", "POST"])
 def api_viajes():
     if request.method == "POST":
@@ -770,6 +832,336 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
