@@ -197,6 +197,24 @@ GATHERING_TIER_ZONE = {
     5: "Zona amarilla/roja", 6: "Zona roja", 7: "Zona roja/Yermos", 8: "Yermos (zona negra)",
 }
 
+# Rangos reales de recolección de la Tabla del Destino que desbloquean la
+# herramienta necesaria para recolectar cada tier. Fuente: wiki oficial de
+# Albion Online (wiki.albiononline.com/wiki/Tiers), consultado julio 2026.
+#
+# Esto es lo que de verdad determina si PUEDES recolectar un tier o no —
+# la especialización (maestria_recoleccion, ver arriba) solo da el bono de
+# rendimiento UNA VEZ que ya desbloqueaste el rango. T1 no requiere rango.
+GATHERING_RANKS = [
+    {"id": "novato",       "nombre": "Novato",       "tier": 2},
+    {"id": "aprendiz",     "nombre": "Aprendiz",     "tier": 3},
+    {"id": "adepto",       "nombre": "Adepto",       "tier": 4},
+    {"id": "experto",      "nombre": "Experto",      "tier": 5},
+    {"id": "maestro",      "nombre": "Maestro",      "tier": 6},
+    {"id": "gran_maestro", "nombre": "Gran Maestro", "tier": 7},
+    {"id": "anciano",      "nombre": "Anciano",      "tier": 8},
+]
+GATHERING_RANK_TIER = {r["id"]: r["tier"] for r in GATHERING_RANKS}
+
 # Consumibles de recolección más mencionados en guías de la comunidad. Sin
 # números exactos de bono porque Sandbox Interactive no publica una tabla
 # oficial verificable — es orientativo, no una promesa de rendimiento.
@@ -586,6 +604,7 @@ def index():
         gathering_tier_names_json=json.dumps(GATHERING_TIER_NAMES),
         gathering_tier_zone_json=json.dumps(GATHERING_TIER_ZONE),
         gathering_consumables_json=json.dumps(GATHERING_CONSUMABLES),
+        gathering_ranks_json=json.dumps(GATHERING_RANKS),
     )
 
 
@@ -738,6 +757,44 @@ def api_compras_delete(compra_id):
     return jsonify({"deleted": True})
 
 
+@app.route("/api/sesiones-recoleccion", methods=["GET", "POST"])
+def api_sesiones_recoleccion():
+    """Una sesión de recolección = una salida. Puede tener varios materiales/tiers
+    distintos adentro (registro_recoleccion), cada uno con su propio precio
+    consultado en el momento en que se agregó."""
+    if request.method == "POST":
+        body = request.get_json() or {}
+        nueva = {
+            "hora_inicio": body.get("hora_inicio") or datetime.now(timezone.utc).isoformat(),
+            "nota": body.get("nota") or None,
+        }
+        res = supabase.table("sesiones_recoleccion").insert(nueva).execute()
+        return jsonify(res.data), 201
+    # Se trae cada sesión con sus items recolectados anidados (join vía FK).
+    res = (
+        supabase.table("sesiones_recoleccion")
+        .select("*, registro_recoleccion(*)")
+        .order("hora_inicio", desc=True)
+        .execute()
+    )
+    return jsonify(res.data)
+
+
+@app.route("/api/sesiones-recoleccion/<int:sesion_id>/cerrar", methods=["POST"])
+def api_sesiones_recoleccion_cerrar(sesion_id):
+    res = supabase.table("sesiones_recoleccion").update({
+        "hora_fin": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", sesion_id).execute()
+    return jsonify(res.data)
+
+
+@app.route("/api/sesiones-recoleccion/<int:sesion_id>", methods=["DELETE"])
+def api_sesiones_recoleccion_delete(sesion_id):
+    # ON DELETE CASCADE en el schema se lleva los registros de esa sesión también.
+    supabase.table("sesiones_recoleccion").delete().eq("id", sesion_id).execute()
+    return jsonify({"deleted": True})
+
+
 @app.route("/api/recolecciones", methods=["GET", "POST"])
 def api_recolecciones():
     if request.method == "POST":
@@ -745,13 +802,17 @@ def api_recolecciones():
         item = ITEMS_BY_ID.get(body["item_id"])
         if not item:
             return jsonify({"error": "item no reconocido"}), 400
+        if not body.get("sesion_id"):
+            return jsonify({"error": "falta sesion_id — primero inicia una sesión de recolección"}), 400
         nueva = {
+            "sesion_id": body["sesion_id"],
             "item_id": item["id"],
             "item_name": item["name"],
             "tier": item["tier"],
             "cantidad": body.get("cantidad", 1),
             "ciudad_zona": body.get("ciudad_zona") or None,
             "precio_unitario": body.get("precio_unitario"),
+            "precio_consultado_en": body.get("precio_consultado_en") or None,
             "nota": body.get("nota") or None,
         }
         res = supabase.table("registro_recoleccion").insert(nueva).execute()
@@ -764,6 +825,29 @@ def api_recolecciones():
 def api_recolecciones_delete(reg_id):
     supabase.table("registro_recoleccion").delete().eq("id", reg_id).execute()
     return jsonify({"deleted": True})
+
+
+@app.route("/api/precio-vivo/<item_id>")
+def api_precio_vivo(item_id):
+    """Consulta el precio ACTUAL directo a la API del Albion Data Project para
+    un solo item, en todas las ciudades — sin pasar por la tabla cacheada de
+    precios_actuales (que solo se actualiza con el cron cada hora). Se usa al
+    agregar cada material a una sesión de recolección, para que la
+    rentabilidad de esa sesión se calcule con un precio realmente fresco."""
+    item = ITEMS_BY_ID.get(item_id)
+    if not item:
+        return jsonify({"error": "item no reconocido"}), 404
+    cfg = get_config()
+    host = SERVER_HOSTS.get(cfg.get("servidor", "west"), SERVER_HOSTS["west"])
+    city_names = ",".join(c["id"] for c in CITIES)
+    url = f"https://{host}/api/v2/stats/prices/{item_id}.json?locations={city_names}&qualities=1"
+    try:
+        res = requests.get(url, timeout=15)
+        res.raise_for_status()
+        data = res.json()
+    except Exception as e:
+        return jsonify({"error": f"No se pudo consultar el precio en vivo: {e}"}), 502
+    return jsonify({"consultado_en": datetime.now(timezone.utc).isoformat(), "precios": data})
 
 
 @app.route("/api/viajes", methods=["GET", "POST"])
@@ -832,6 +916,998 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
