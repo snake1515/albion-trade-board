@@ -268,6 +268,9 @@
   const GATHERING_BIOME = {{ gathering_biome_json | safe }};
   const REFINING_BONUS_CITY = {{ refining_bonus_json | safe }};
   const RAW_RESOURCE_LABELS = {{ raw_resource_labels_json | safe }};
+  const GATHERING_TIER_NAMES = {{ gathering_tier_names_json | safe }};
+  const GATHERING_TIER_ZONE = {{ gathering_tier_zone_json | safe }};
+  const GATHERING_CONSUMABLES = {{ gathering_consumables_json | safe }};
 
   const statusEl = document.getElementById('atb-status');
   const contentEl = document.getElementById('atb-content');
@@ -1258,104 +1261,274 @@
   }
 
   async function renderRecoleccion() {
-    contentEl.innerHTML = '<div class="atb-empty">Cargando perfil y precios...</div>';
-    const [perfilRes, preciosRes] = await Promise.all([fetch('/api/perfil'), fetch('/api/precios')]);
+    contentEl.innerHTML = '<div class="atb-empty">Cargando perfil, precios y registro...</div>';
+    const [perfilRes, preciosRes, regRes] = await Promise.all([
+      fetch('/api/perfil'), fetch('/api/precios'), fetch('/api/recolecciones'),
+    ]);
     const perfil = await perfilRes.json();
     const precios = await preciosRes.json();
-    const maestrias = perfil.maestria_recoleccion || {};
+    let registro = await regRes.json();
 
     const RAW_KEYS = Object.keys(RAW_RESOURCE_LABELS);
 
-    const maestriaInputs = RAW_KEYS.map(k => `
-      <div class="atb-field">
-        <label for="atb-mst-rec-${k}">${RAW_RESOURCE_LABELS[k]}</label>
-        <input type="number" id="atb-mst-rec-${k}" min="0" max="100" value="${maestrias[k] ?? 0}">
-      </div>`).join('');
-
-    // Filas: un item crudo (T4/T6/T8 de cada recurso) por fila. Se identifica
-    // por el sufijo del id (T4_ORE, T6_HIDE, etc.) contra RAW_RESOURCE_LABELS.
-    const filas = [];
-    ITEMS.forEach(item => {
-      const partes = item.id.split('_');
-      const recurso = partes.slice(1).join('_');
-      if (!RAW_RESOURCE_LABELS[recurso]) return;
-
-      const biome = GATHERING_BIOME[recurso];
-      const ciudadRefino = REFINING_BONUS_CITY[recurso];
-      const precioRefino = precios.find(p => p.item_id === item.id && p.city === ciudadRefino);
-      const precioVenta = precioRefino ? Number(precioRefino.buy_price_max || 0) : 0;
-
-      const maestria = Number(maestrias[recurso] || 0);
-      const riesgoRecoleccion = riskValues[biome.primaria] ?? 30;
-
-      // Score: aproximación propia, NO es la fórmula exacta del juego.
-      // Bono de maestría hasta +40% (tope arbitrario, el real depende de tu
-      // árbol de especialización) y penalización por riesgo de la zona
-      // igual al criterio que ya usas en "Por ruta" (riesgo/150).
-      const bonoMaestria = 1 + (maestria / 100) * 0.4;
-      const factorRiesgo = 1 - (riesgoRecoleccion / 150);
-      const score = precioVenta * bonoMaestria * factorRiesgo;
-
-      filas.push({
-        item, recurso, biome, ciudadRefino, precioVenta, riesgoRecoleccion, score,
-        fecha: precioRefino ? precioRefino.sell_price_min_date : null,
-      });
+    // maestria_recoleccion: por recurso, una lista de etapas {tier, nivel}.
+    // Cada etapa está atada a un TIER real del juego (ej. tier 4 = Troncos de
+    // pino), porque la fórmula real de Albion da el bono de rendimiento por
+    // tier específico, no de forma genérica para todo el recurso.
+    // Migración: datos viejos en formato número plano o {etapa,nivel} de
+    // versiones anteriores de esta pestaña se ignoran limpiamente (quedan en
+    // 0) para no romper con datos corruptos — el usuario los vuelve a cargar.
+    const raw = perfil.maestria_recoleccion || {};
+    const maestrias = {};
+    RAW_KEYS.forEach(k => {
+      const v = raw[k];
+      maestrias[k] = (Array.isArray(v) ? v : []).filter(e => e && typeof e.tier === 'number');
     });
 
-    filas.sort((a, b) => b.score - a.score);
+    function nivelParaTier(recurso, tier) {
+      const etapas = maestrias[recurso] || [];
+      const e = etapas.find(x => x.tier === tier);
+      return e ? Number(e.nivel) || 0 : 0;
+    }
 
-    const cityLabel = id => (CITIES.find(c => c.id === id) || {}).name || id;
+    function renderMaestriaGrid() {
+      return RAW_KEYS.map(k => {
+        const tiersUsados = new Set((maestrias[k] || []).map(e => e.tier));
+        const tiersDisponibles = Object.keys(GATHERING_TIER_NAMES[k]).map(Number).filter(t => !tiersUsados.has(t));
+        return `
+        <div class="atb-panel" style="padding:12px; margin-bottom:0;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <strong style="font-family:'Inter',sans-serif; font-size:13px;">${RAW_RESOURCE_LABELS[k]}</strong>
+            ${tiersDisponibles.length ? `<button class="atb-event-del" data-add-etapa="${k}" style="border-color: var(--teal); color: var(--teal);">+ Tier</button>` : ''}
+          </div>
+          <div data-etapas-de="${k}">
+            ${(maestrias[k] || []).map((e, i) => `
+              <div style="display:flex; gap:6px; margin-bottom:6px; align-items:center;" data-etapa-row="${k}:${i}">
+                <span style="flex:1; font-size:11.5px; color:var(--text-muted);">T${e.tier} · ${GATHERING_TIER_NAMES[k][e.tier]}</span>
+                <input type="number" min="0" max="100" value="${e.nivel ?? 0}" data-etapa-nivel="${k}:${i}" style="width:60px; background: var(--panel-raised); border:1px solid var(--hairline); color:var(--text); padding:6px 6px; border-radius:4px; font-family:'IBM Plex Mono',monospace; font-size:12px; text-align:center;">
+                <button data-del-etapa="${k}:${i}" style="background:none; border:1px solid var(--hairline); color:var(--text-muted); border-radius:4px; padding:0 8px; cursor:pointer;">×</button>
+              </div>`).join('') || '<p style="font-size:11.5px; color:var(--text-muted); margin:0;">Sin tiers registrados todavía.</p>'}
+          </div>
+        </div>`;
+      }).join('');
+    }
 
-    const filasHtml = filas.map(f => `
-      <tr>
-        <td>${RAW_RESOURCE_LABELS[f.recurso]}</td>
-        <td><span class="atb-tier-pill">T${f.item.tier}</span></td>
-        <td>${cityLabel(f.biome.primaria)}</td>
-        <td>${cityLabel(f.ciudadRefino)}</td>
-        <td>${f.precioVenta ? f.precioVenta.toLocaleString('es-CO') : '—'}</td>
-        <td>${f.riesgoRecoleccion}</td>
-        <td><strong>${f.score ? Math.round(f.score).toLocaleString('es-CO') : '—'}</strong></td>
-      </tr>`).join('');
+    function tablaRentabilidad() {
+      const filas = [];
+      ITEMS.forEach(item => {
+        const partes = item.id.split('_');
+        const recurso = partes.slice(1).join('_');
+        if (!RAW_RESOURCE_LABELS[recurso]) return;
 
-    contentEl.innerHTML = `
-      <div class="atb-tip"><strong>Cómo leer esto:</strong> "Recolectar en" es la ciudad/bioma donde ese material es más abundante.
-      "Refinar/vender en" es la ciudad con el bonus de refino de ese material — casi nunca es la misma ciudad, así que hay transporte de por medio.
-      El puntaje combina el precio actual, tu maestría y el riesgo de la zona de recolección — es una guía, no una promesa de ganancia.</div>
+        const biome = GATHERING_BIOME[recurso];
+        const ciudadRefino = REFINING_BONUS_CITY[recurso];
+        const precioRefino = precios.find(p => p.item_id === item.id && p.city === ciudadRefino);
+        const precioVenta = precioRefino ? Number(precioRefino.buy_price_max || 0) : 0;
 
-      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">Tu maestría por recurso (0-100)</p>
-      <div class="atb-risk-grid" style="margin-bottom:12px;">${maestriaInputs}</div>
-      <button class="atb-btn" id="atb-rec-save" style="margin-bottom:22px;">Guardar maestría</button>
+        const nivel = nivelParaTier(recurso, item.tier);
+        const riesgoRecoleccion = riskValues[biome.primaria] ?? 30;
 
-      <p class="atb-section-label">Materiales ordenados por rentabilidad estimada de recolección</p>
-      <div class="atb-scroll">
-        <table class="atb-table">
-          <thead>
-            <tr>
-              <th>Recurso</th><th>Tier</th><th>Recolectar en</th><th>Refinar/vender en</th>
-              <th>Precio actual</th><th>Riesgo zona</th><th>Puntaje</th>
-            </tr>
-          </thead>
-          <tbody>${filasHtml || '<tr><td colspan="7">Sin datos de precios todavía — usa "Traer últimos precios".</td></tr>'}</tbody>
-        </table>
-      </div>
+        // Fórmula real del juego: +0.5% de rendimiento de recolección por
+        // cada nivel de especialización de ESE tier específico, hasta 100
+        // niveles = +50% máximo. Si no registraste una etapa para este tier,
+        // el bono queda en 0 (no inventamos un valor).
+        const bonoMaestria = 1 + (nivel / 100) * 0.5;
+        const factorRiesgo = 1 - (riesgoRecoleccion / 150);
+        const score = precioVenta * bonoMaestria * factorRiesgo;
 
-      <p style="font-size:11px; color:var(--text-muted); margin-top:14px; line-height:1.5;">
-        El bono de maestría (hasta +40%) y la penalización por riesgo son una aproximación mía para ordenar los materiales,
-        no la fórmula exacta del juego — tu rendimiento real depende también de tu árbol de especialización, equipo de recolección y buffs activos.
-      </p>
-    `;
-
-    document.getElementById('atb-rec-save').addEventListener('click', async () => {
-      const maestria_recoleccion = {};
-      RAW_KEYS.forEach(k => { maestria_recoleccion[k] = Number(document.getElementById('atb-mst-rec-' + k).value) || 0; });
-      await fetch('/api/perfil', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maestria_recoleccion }),
+        filas.push({ item, recurso, biome, ciudadRefino, precioVenta, riesgoRecoleccion, score, nivel });
       });
-      renderRecoleccion();
-    });
+      filas.sort((a, b) => b.score - a.score);
+
+      const cityLabel = id => (CITIES.find(c => c.id === id) || {}).name || id;
+      return filas.map(f => `
+        <tr>
+          <td>${RAW_RESOURCE_LABELS[f.recurso]}</td>
+          <td><span class="atb-tier-pill">T${f.item.tier}</span></td>
+          <td>${cityLabel(f.biome.primaria)}</td>
+          <td>${GATHERING_TIER_ZONE[f.item.tier]}</td>
+          <td>${cityLabel(f.ciudadRefino)}</td>
+          <td>${f.precioVenta ? f.precioVenta.toLocaleString('es-CO') : '—'}</td>
+          <td>${f.nivel ? f.nivel + '/100' : '—'}</td>
+          <td><strong>${f.score ? Math.round(f.score).toLocaleString('es-CO') : '—'}</strong></td>
+        </tr>`).join('') || '<tr><td colspan="8">Sin datos de precios todavía — usa "Traer últimos precios".</td></tr>';
+    }
+
+    function consumiblesHtml() {
+      return GATHERING_CONSUMABLES.map(c => `
+        <div class="atb-weapon-panel" style="margin-bottom:10px; padding:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:baseline;">
+            <strong style="font-size:12.5px; color:var(--text);">${c.nombre}</strong>
+            <span class="atb-content-pill">${c.tipo}</span>
+          </div>
+          <p style="font-size:11.5px; color:var(--text-muted); margin:6px 0 0; line-height:1.5;">${c.efecto}</p>
+        </div>`).join('');
+    }
+
+    // Opciones del selector de item para el registro: solo materiales crudos
+    const rawItems = ITEMS.filter(item => RAW_RESOURCE_LABELS[item.id.split('_').slice(1).join('_')]);
+
+    function itemOptionsHtml() {
+      return rawItems.map(item => `<option value="${item.id}">${item.name} (T${item.tier})</option>`).join('');
+    }
+
+    function totalesRegistro() {
+      const totalItems = registro.reduce((acc, r) => acc + Number(r.cantidad || 0), 0);
+      const totalPlata = registro.reduce((acc, r) => acc + (Number(r.cantidad || 0) * Number(r.precio_unitario || 0)), 0);
+      return { totalItems, totalPlata };
+    }
+
+    function registroTablaHtml() {
+      if (!registro.length) return '<tr><td colspan="6">Todavía no has agregado recolecciones.</td></tr>';
+      return registro.map(r => `
+        <tr>
+          <td>${r.item_name}</td>
+          <td><span class="atb-tier-pill">T${r.tier}</span></td>
+          <td>${Number(r.cantidad).toLocaleString('es-CO')}</td>
+          <td>${r.ciudad_zona || '—'}</td>
+          <td>${r.precio_unitario ? Number(r.precio_unitario).toLocaleString('es-CO') : '—'}</td>
+          <td><button class="atb-event-del" data-del-reg="${r.id}">Eliminar</button></td>
+        </tr>`).join('');
+    }
+
+    function pintar() {
+      const { totalItems, totalPlata } = totalesRegistro();
+      contentEl.innerHTML = `
+        <div class="atb-tip"><strong>Cómo leer esto:</strong> "Recolectar en" es la ciudad/bioma donde ese material es más abundante — pero "Zona requerida"
+        te dice si de verdad lo vas a encontrar cerca de esa ciudad (tiers bajos) o si tienes que meterte a zona roja/negra (tiers altos), que es donde de verdad está el riesgo real.
+        "Refinar/vender en" es la ciudad con el bonus de refino. El puntaje usa el nivel de maestría que registraste para ESE tier exacto — si no has registrado nada para un tier, no le suma bono.</div>
+
+        <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">Tu maestría por recurso y tier (fórmula real: +0.5% de rendimiento por nivel, tope 100 = +50%)</p>
+        <div class="atb-risk-grid" style="grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); margin-bottom:12px;">${renderMaestriaGrid()}</div>
+        <button class="atb-btn" id="atb-rec-save" style="margin-bottom:22px;">Guardar maestría</button>
+
+        <p class="atb-section-label">Materiales ordenados por rentabilidad estimada de recolección</p>
+        <div class="atb-scroll">
+          <table class="atb-table">
+            <thead>
+              <tr>
+                <th>Recurso</th><th>Tier</th><th>Recolectar en</th><th>Zona requerida</th><th>Refinar/vender en</th>
+                <th>Precio actual</th><th>Tu maestría (ese tier)</th><th>Puntaje</th>
+              </tr>
+            </thead>
+            <tbody>${tablaRentabilidad()}</tbody>
+          </table>
+        </div>
+        <p style="font-size:11px; color:var(--text-muted); margin-top:10px; line-height:1.5;">
+          No incluye equipo de recolección, comida, premium ni calidad del nodo (Pobre-Excelente) — esos factores cambian en vivo y ningún dato guardado los captura. Úsalo para comparar entre materiales, no como cifra exacta de ganancia.
+        </p>
+
+        <p class="atb-section-label">Comida y pociones para optimizar la recolección</p>
+        ${consumiblesHtml()}
+        <p style="font-size:11px; color:var(--text-muted); margin-top:4px; line-height:1.5;">Según guías de la comunidad — Sandbox Interactive no publica una tabla oficial con los números exactos de cada bono.</p>
+
+        <p class="atb-section-label">Registro de recolecciones</p>
+        <div class="atb-tip">Anota lo que vas sacando en cada salida — cantidad, dónde lo recolectaste y el precio de referencia. No trae el precio solo: usa el botón para consultarlo contra tus precios guardados.</div>
+        <div class="atb-controls-grid" style="margin-bottom:12px;">
+          <div class="atb-field">
+            <label for="atb-reg-item">Item</label>
+            <select id="atb-reg-item">${itemOptionsHtml()}</select>
+          </div>
+          <div class="atb-field">
+            <label for="atb-reg-cantidad">Cantidad</label>
+            <input type="number" id="atb-reg-cantidad" min="1" value="1">
+          </div>
+          <div class="atb-field">
+            <label for="atb-reg-zona">Ciudad / zona donde recolectaste</label>
+            <input type="text" id="atb-reg-zona" placeholder="ej. Yermos cerca de Martlock">
+          </div>
+          <div class="atb-field">
+            <label for="atb-reg-precio">Precio unitario (plata)</label>
+            <div style="display:flex; gap:6px;">
+              <input type="number" id="atb-reg-precio" min="0" style="flex:1;">
+              <button class="atb-btn" id="atb-reg-consultar" style="padding:8px 12px; white-space:nowrap;">Consultar</button>
+            </div>
+          </div>
+        </div>
+        <button class="atb-btn" id="atb-reg-agregar" style="margin-bottom:18px;">Agregar al registro</button>
+
+        <div class="atb-scroll">
+          <table class="atb-table">
+            <thead><tr><th>Item</th><th>Tier</th><th>Cantidad</th><th>Ciudad/zona</th><th>Precio unit.</th><th></th></tr></thead>
+            <tbody>${registroTablaHtml()}</tbody>
+          </table>
+        </div>
+        <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">${totalItems.toLocaleString('es-CO')} unidades registradas · valor de referencia ${Math.round(totalPlata).toLocaleString('es-CO')} plata</p>
+      `;
+
+      contentEl.querySelectorAll('[data-add-etapa]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const k = btn.getAttribute('data-add-etapa');
+          const tiersUsados = new Set((maestrias[k] || []).map(e => e.tier));
+          const siguienteTier = Object.keys(GATHERING_TIER_NAMES[k]).map(Number).find(t => !tiersUsados.has(t));
+          if (siguienteTier === undefined) return;
+          maestrias[k].push({ tier: siguienteTier, nivel: 0 });
+          pintar();
+        });
+      });
+      contentEl.querySelectorAll('[data-del-etapa]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const [k, i] = btn.getAttribute('data-del-etapa').split(':');
+          maestrias[k].splice(Number(i), 1);
+          pintar();
+        });
+      });
+      contentEl.querySelectorAll('[data-etapa-nivel]').forEach(inp => {
+        inp.addEventListener('change', () => {
+          const [k, i] = inp.getAttribute('data-etapa-nivel').split(':');
+          maestrias[k][Number(i)].nivel = Number(inp.value) || 0;
+          pintar();
+        });
+      });
+      document.getElementById('atb-rec-save').addEventListener('click', async () => {
+        await fetch('/api/perfil', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ maestria_recoleccion: maestrias }),
+        });
+      });
+
+      document.getElementById('atb-reg-consultar').addEventListener('click', () => {
+        const itemId = document.getElementById('atb-reg-item').value;
+        const item = ITEMS_BY_ID_JS(itemId);
+        const recurso = itemId.split('_').slice(1).join('_');
+        const ciudadRefino = REFINING_BONUS_CITY[recurso];
+        const precioRefino = precios.find(p => p.item_id === itemId && p.city === ciudadRefino);
+        document.getElementById('atb-reg-precio').value = precioRefino ? Number(precioRefino.buy_price_max || 0) : '';
+        if (!precioRefino) alert('No hay precio guardado para ese item en ' + ciudadRefino + ' todavía. Usa "Traer últimos precios" en Resumen, o escribe el precio a mano.');
+      });
+
+      document.getElementById('atb-reg-agregar').addEventListener('click', async () => {
+        const item_id = document.getElementById('atb-reg-item').value;
+        const cantidad = Number(document.getElementById('atb-reg-cantidad').value) || 1;
+        const ciudad_zona = document.getElementById('atb-reg-zona').value;
+        const precio_unitario = document.getElementById('atb-reg-precio').value ? Number(document.getElementById('atb-reg-precio').value) : null;
+        const res = await fetch('/api/recolecciones', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ item_id, cantidad, ciudad_zona, precio_unitario }),
+        });
+        if (res.ok) {
+          registro = await (await fetch('/api/recolecciones')).json();
+          pintar();
+        }
+      });
+
+      contentEl.querySelectorAll('[data-del-reg]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-del-reg');
+          await fetch('/api/recolecciones/' + id, { method: 'DELETE' });
+          registro = registro.filter(r => String(r.id) !== String(id));
+          pintar();
+        });
+      });
+    }
+
+    function ITEMS_BY_ID_JS(id) { return ITEMS.find(i => i.id === id); }
+
+    pintar();
   }
+
 
   async function renderResumen() {
     contentEl.innerHTML = '<div class="atb-empty">Comparando los 3 métodos...</div>';
@@ -1579,6 +1752,598 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
