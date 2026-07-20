@@ -271,6 +271,7 @@
   const GATHERING_TIER_NAMES = {{ gathering_tier_names_json | safe }};
   const GATHERING_TIER_ZONE = {{ gathering_tier_zone_json | safe }};
   const GATHERING_CONSUMABLES = {{ gathering_consumables_json | safe }};
+  const GATHERING_RANKS = {{ gathering_ranks_json | safe }};
 
   const statusEl = document.getElementById('atb-status');
   const contentEl = document.getElementById('atb-content');
@@ -1261,23 +1262,35 @@
   }
 
   async function renderRecoleccion() {
-    contentEl.innerHTML = '<div class="atb-empty">Cargando perfil, precios y registro...</div>';
-    const [perfilRes, preciosRes, regRes] = await Promise.all([
-      fetch('/api/perfil'), fetch('/api/precios'), fetch('/api/recolecciones'),
+    contentEl.innerHTML = '<div class="atb-empty">Cargando perfil, precios y sesiones...</div>';
+    const [perfilRes, preciosRes, sesionesRes] = await Promise.all([
+      fetch('/api/perfil'), fetch('/api/precios'), fetch('/api/sesiones-recoleccion'),
     ]);
     const perfil = await perfilRes.json();
     const precios = await preciosRes.json();
-    let registro = await regRes.json();
+    let sesiones = await sesionesRes.json();
 
     const RAW_KEYS = Object.keys(RAW_RESOURCE_LABELS);
+
+    // rango_recoleccion: por recurso, el ID del rango de la Tabla del Destino
+    // que ya desbloqueaste (novato..anciano). Esto es lo que de verdad decide
+    // si PUEDES recolectar un tier — no lo confundas con la especialización.
+    const rangos = Object.assign({}, perfil.rango_recoleccion || {});
+
+    function tierMaxDesbloqueado(recurso) {
+      const r = GATHERING_RANKS.find(x => x.id === rangos[recurso]);
+      return r ? r.tier : 1; // 1 = todavía no has registrado ningún rango para este recurso
+    }
+
+    function rangoNombre(recurso) {
+      const r = GATHERING_RANKS.find(x => x.id === rangos[recurso]);
+      return r ? r.nombre : 'Sin registrar';
+    }
 
     // maestria_recoleccion: por recurso, una lista de etapas {tier, nivel}.
     // Cada etapa está atada a un TIER real del juego (ej. tier 4 = Troncos de
     // pino), porque la fórmula real de Albion da el bono de rendimiento por
     // tier específico, no de forma genérica para todo el recurso.
-    // Migración: datos viejos en formato número plano o {etapa,nivel} de
-    // versiones anteriores de esta pestaña se ignoran limpiamente (quedan en
-    // 0) para no romper con datos corruptos — el usuario los vuelve a cargar.
     const raw = perfil.maestria_recoleccion || {};
     const maestrias = {};
     RAW_KEYS.forEach(k => {
@@ -1293,13 +1306,26 @@
 
     function renderMaestriaGrid() {
       return RAW_KEYS.map(k => {
+        const maxTier = tierMaxDesbloqueado(k);
         const tiersUsados = new Set((maestrias[k] || []).map(e => e.tier));
-        const tiersDisponibles = Object.keys(GATHERING_TIER_NAMES[k]).map(Number).filter(t => !tiersUsados.has(t));
+        // Solo se puede registrar especialización de tiers que ya desbloqueaste con tu rango.
+        const tiersDisponibles = Object.keys(GATHERING_TIER_NAMES[k]).map(Number)
+          .filter(t => !tiersUsados.has(t) && t <= maxTier);
+        const rangoOptions = GATHERING_RANKS.map(r =>
+          `<option value="${r.id}" ${rangos[k] === r.id ? 'selected' : ''}>${r.nombre} (hasta T${r.tier})</option>`
+        ).join('');
         return `
         <div class="atb-panel" style="padding:12px; margin-bottom:0;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
             <strong style="font-family:'Inter',sans-serif; font-size:13px;">${RAW_RESOURCE_LABELS[k]}</strong>
             ${tiersDisponibles.length ? `<button class="atb-event-del" data-add-etapa="${k}" style="border-color: var(--teal); color: var(--teal);">+ Tier</button>` : ''}
+          </div>
+          <div style="margin-bottom:8px;">
+            <label style="font-size:10.5px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Tu rango desbloqueado</label>
+            <select data-rango-recurso="${k}" style="width:100%; margin-top:4px; background: var(--panel-raised); border:1px solid var(--hairline); color:var(--text); padding:6px; border-radius:4px; font-size:12px;">
+              <option value="" ${!rangos[k] ? 'selected' : ''}>Sin registrar (nada desbloqueado)</option>
+              ${rangoOptions}
+            </select>
           </div>
           <div data-etapas-de="${k}">
             ${(maestrias[k] || []).map((e, i) => `
@@ -1327,6 +1353,8 @@
 
         const nivel = nivelParaTier(recurso, item.tier);
         const riesgoRecoleccion = riskValues[biome.primaria] ?? 30;
+        const maxTier = tierMaxDesbloqueado(recurso);
+        const bloqueado = item.tier > maxTier;
 
         // Fórmula real del juego: +0.5% de rendimiento de recolección por
         // cada nivel de especialización de ESE tier específico, hasta 100
@@ -1334,22 +1362,23 @@
         // el bono queda en 0 (no inventamos un valor).
         const bonoMaestria = 1 + (nivel / 100) * 0.5;
         const factorRiesgo = 1 - (riesgoRecoleccion / 150);
-        const score = precioVenta * bonoMaestria * factorRiesgo;
+        const score = bloqueado ? 0 : precioVenta * bonoMaestria * factorRiesgo;
 
-        filas.push({ item, recurso, biome, ciudadRefino, precioVenta, riesgoRecoleccion, score, nivel });
+        filas.push({ item, recurso, biome, ciudadRefino, precioVenta, riesgoRecoleccion, score, nivel, bloqueado });
       });
-      filas.sort((a, b) => b.score - a.score);
+      // Desbloqueados primero, ordenados por puntaje; bloqueados al final.
+      filas.sort((a, b) => (a.bloqueado - b.bloqueado) || (b.score - a.score));
 
       const cityLabel = id => (CITIES.find(c => c.id === id) || {}).name || id;
       return filas.map(f => `
-        <tr>
+        <tr style="${f.bloqueado ? 'opacity:0.45;' : ''}">
           <td>${RAW_RESOURCE_LABELS[f.recurso]}</td>
           <td><span class="atb-tier-pill">T${f.item.tier}</span></td>
           <td>${cityLabel(f.biome.primaria)}</td>
           <td>${GATHERING_TIER_ZONE[f.item.tier]}</td>
           <td>${cityLabel(f.ciudadRefino)}</td>
           <td>${f.precioVenta ? f.precioVenta.toLocaleString('es-CO') : '—'}</td>
-          <td>${f.nivel ? f.nivel + '/100' : '—'}</td>
+          <td>${f.bloqueado ? `<span style="color:var(--text-muted);">🔒 necesitas ${rangoNombre(f.recurso)==='Sin registrar' ? 'desbloquear rango' : 'subir rango'}</span>` : (f.nivel ? f.nivel + '/100' : '—')}</td>
           <td><strong>${f.score ? Math.round(f.score).toLocaleString('es-CO') : '—'}</strong></td>
         </tr>`).join('') || '<tr><td colspan="8">Sin datos de precios todavía — usa "Traer últimos precios".</td></tr>';
     }
@@ -1372,35 +1401,134 @@
       return rawItems.map(item => `<option value="${item.id}">${item.name} (T${item.tier})</option>`).join('');
     }
 
-    function totalesRegistro() {
-      const totalItems = registro.reduce((acc, r) => acc + Number(r.cantidad || 0), 0);
-      const totalPlata = registro.reduce((acc, r) => acc + (Number(r.cantidad || 0) * Number(r.precio_unitario || 0)), 0);
-      return { totalItems, totalPlata };
+    function fmtHora(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      return d.toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
     }
 
-    function registroTablaHtml() {
-      if (!registro.length) return '<tr><td colspan="6">Todavía no has agregado recolecciones.</td></tr>';
-      return registro.map(r => `
+    function duracionHoras(inicio, fin) {
+      if (!inicio || !fin) return null;
+      return (new Date(fin) - new Date(inicio)) / 3600000;
+    }
+
+    function duracionTexto(horas) {
+      if (horas === null) return '—';
+      const h = Math.floor(horas);
+      const m = Math.round((horas - h) * 60);
+      return `${h}h ${m}m`;
+    }
+
+    function totalesSesion(sesion) {
+      const items = sesion.registro_recoleccion || [];
+      const totalItems = items.reduce((acc, r) => acc + Number(r.cantidad || 0), 0);
+      const plataBruta = items.reduce((acc, r) => acc + (Number(r.cantidad || 0) * Number(r.precio_unitario || 0)), 0);
+      const impuesto = Number(config.impuesto ?? 4);
+      const plataNeta = plataBruta * (1 - impuesto / 100);
+      return { totalItems, plataBruta, plataNeta };
+    }
+
+    function itemsSesionTablaHtml(sesion) {
+      const items = sesion.registro_recoleccion || [];
+      if (!items.length) return '<tr><td colspan="7">Sin materiales agregados a esta sesión todavía.</td></tr>';
+      return items.map(r => `
         <tr>
           <td>${r.item_name}</td>
           <td><span class="atb-tier-pill">T${r.tier}</span></td>
           <td>${Number(r.cantidad).toLocaleString('es-CO')}</td>
           <td>${r.ciudad_zona || '—'}</td>
           <td>${r.precio_unitario ? Number(r.precio_unitario).toLocaleString('es-CO') : '—'}</td>
+          <td>${r.precio_consultado_en ? fmtHora(r.precio_consultado_en) : '<span style="color:var(--text-muted);">manual</span>'}</td>
           <td><button class="atb-event-del" data-del-reg="${r.id}">Eliminar</button></td>
         </tr>`).join('');
     }
 
     function pintar() {
-      const { totalItems, totalPlata } = totalesRegistro();
+      const sesionActiva = sesiones.find(s => !s.hora_fin);
+      const sesionesCerradas = sesiones.filter(s => s.hora_fin);
+
+      const panelSesionActiva = sesionActiva ? `
+        <div class="atb-panel" style="padding:14px; margin-bottom:16px; border-color: var(--teal);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <div>
+              <strong style="font-size:13px;">Sesión activa</strong>
+              <span style="font-size:11.5px; color:var(--text-muted); margin-left:8px;">iniciada ${fmtHora(sesionActiva.hora_inicio)}</span>
+            </div>
+            <button class="atb-btn" id="atb-ses-cerrar" style="padding:6px 14px;">Cerrar sesión</button>
+          </div>
+          <div class="atb-controls-grid" style="margin-bottom:12px;">
+            <div class="atb-field">
+              <label for="atb-reg-item">Item recolectado</label>
+              <select id="atb-reg-item">${itemOptionsHtml()}</select>
+            </div>
+            <div class="atb-field">
+              <label for="atb-reg-cantidad">Cantidad</label>
+              <input type="number" id="atb-reg-cantidad" min="1" value="1">
+            </div>
+            <div class="atb-field">
+              <label for="atb-reg-zona">Ciudad / zona donde recolectaste</label>
+              <input type="text" id="atb-reg-zona" placeholder="ej. Yermos cerca de Martlock">
+            </div>
+            <div class="atb-field">
+              <label for="atb-reg-precio">Precio unitario (plata)</label>
+              <div style="display:flex; gap:6px;">
+                <input type="number" id="atb-reg-precio" min="0" style="flex:1;">
+                <button class="atb-btn" id="atb-reg-consultar" style="padding:8px 12px; white-space:nowrap;">Precio en vivo</button>
+              </div>
+            </div>
+          </div>
+          <p id="atb-reg-consultado-info" style="font-size:11px; color:var(--text-muted); margin:-6px 0 10px;"></p>
+          <button class="atb-btn" id="atb-reg-agregar">Agregar a esta sesión</button>
+
+          <div class="atb-scroll" style="margin-top:14px;">
+            <table class="atb-table">
+              <thead><tr><th>Item</th><th>Tier</th><th>Cantidad</th><th>Ciudad/zona</th><th>Precio unit.</th><th>Precio consultado</th><th></th></tr></thead>
+              <tbody>${itemsSesionTablaHtml(sesionActiva)}</tbody>
+            </table>
+          </div>
+          ${(() => { const t = totalesSesion(sesionActiva); return `<p style="font-size:12px; color:var(--text-muted); margin-top:8px;">${t.totalItems.toLocaleString('es-CO')} unidades · bruto ${Math.round(t.plataBruta).toLocaleString('es-CO')} plata · neto (post-impuesto) ${Math.round(t.plataNeta).toLocaleString('es-CO')} plata</p>`; })()}
+        </div>
+      ` : `
+        <div class="atb-panel" style="padding:14px; margin-bottom:16px;">
+          <p style="font-size:12.5px; color:var(--text-muted); margin:0 0 10px;">No tienes una sesión de recolección abierta ahora mismo.</p>
+          <button class="atb-btn" id="atb-ses-iniciar">Iniciar sesión de recolección</button>
+        </div>
+      `;
+
+      const historialHtml = sesionesCerradas.length ? sesionesCerradas.map(s => {
+        const t = totalesSesion(s);
+        const horas = duracionHoras(s.hora_inicio, s.hora_fin);
+        const plataHora = horas ? t.plataNeta / horas : null;
+        return `
+        <div class="atb-panel" style="padding:12px; margin-bottom:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+            <div>
+              <strong style="font-size:12.5px;">${fmtHora(s.hora_inicio)} → ${fmtHora(s.hora_fin)}</strong>
+              <span style="font-size:11.5px; color:var(--text-muted); margin-left:8px;">${duracionTexto(horas)}</span>
+            </div>
+            <button class="atb-event-del" data-del-ses="${s.id}">Eliminar sesión</button>
+          </div>
+          <details style="margin-top:8px;">
+            <summary style="cursor:pointer; font-size:11.5px; color:var(--teal);">${t.totalItems.toLocaleString('es-CO')} unidades · neto ${Math.round(t.plataNeta).toLocaleString('es-CO')} plata${plataHora ? ` · ${Math.round(plataHora).toLocaleString('es-CO')} plata/hora` : ''} — ver detalle</summary>
+            <div class="atb-scroll" style="margin-top:8px;">
+              <table class="atb-table">
+                <thead><tr><th>Item</th><th>Tier</th><th>Cantidad</th><th>Ciudad/zona</th><th>Precio unit.</th><th>Precio consultado</th><th></th></tr></thead>
+                <tbody>${itemsSesionTablaHtml(s)}</tbody>
+              </table>
+            </div>
+          </details>
+        </div>`;
+      }).join('') : '<p style="font-size:12px; color:var(--text-muted);">Todavía no has cerrado ninguna sesión.</p>';
+
       contentEl.innerHTML = `
         <div class="atb-tip"><strong>Cómo leer esto:</strong> "Recolectar en" es la ciudad/bioma donde ese material es más abundante — pero "Zona requerida"
         te dice si de verdad lo vas a encontrar cerca de esa ciudad (tiers bajos) o si tienes que meterte a zona roja/negra (tiers altos), que es donde de verdad está el riesgo real.
-        "Refinar/vender en" es la ciudad con el bonus de refino. El puntaje usa el nivel de maestría que registraste para ESE tier exacto — si no has registrado nada para un tier, no le suma bono.</div>
+        "Refinar/vender en" es la ciudad con el bonus de refino. Un material aparece <strong>bloqueado (🔒)</strong> cuando el tier es más alto que el rango que registraste abajo — en el juego eso significa que todavía no tienes la herramienta para recolectarlo, sin importar tu nivel de especialización.</div>
 
-        <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">Tu maestría por recurso y tier (fórmula real: +0.5% de rendimiento por nivel, tope 100 = +50%)</p>
-        <div class="atb-risk-grid" style="grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); margin-bottom:12px;">${renderMaestriaGrid()}</div>
-        <button class="atb-btn" id="atb-rec-save" style="margin-bottom:22px;">Guardar maestría</button>
+        <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:4px;">Tu rango y especialización por recurso</p>
+        <p style="font-size:11px; color:var(--text-muted); margin:0 0 10px; line-height:1.5;">El <strong>rango</strong> (Novato→Anciano) es lo que desbloquea la herramienta de cada tier — sin él, no puedes recolectar ese material aunque quieras. La <strong>especialización</strong> (0-100 por tier) solo da el bono de rendimiento (+0.5%/nivel, tope +50%) una vez ya tienes el rango.</p>
+        <div class="atb-risk-grid" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-bottom:12px;">${renderMaestriaGrid()}</div>
+        <button class="atb-btn" id="atb-rec-save" style="margin-bottom:22px;">Guardar rango y maestría</button>
 
         <p class="atb-section-label">Materiales ordenados por rentabilidad estimada de recolección</p>
         <div class="atb-scroll">
@@ -1422,45 +1550,20 @@
         ${consumiblesHtml()}
         <p style="font-size:11px; color:var(--text-muted); margin-top:4px; line-height:1.5;">Según guías de la comunidad — Sandbox Interactive no publica una tabla oficial con los números exactos de cada bono.</p>
 
-        <p class="atb-section-label">Registro de recolecciones</p>
-        <div class="atb-tip">Anota lo que vas sacando en cada salida — cantidad, dónde lo recolectaste y el precio de referencia. No trae el precio solo: usa el botón para consultarlo contra tus precios guardados.</div>
-        <div class="atb-controls-grid" style="margin-bottom:12px;">
-          <div class="atb-field">
-            <label for="atb-reg-item">Item</label>
-            <select id="atb-reg-item">${itemOptionsHtml()}</select>
-          </div>
-          <div class="atb-field">
-            <label for="atb-reg-cantidad">Cantidad</label>
-            <input type="number" id="atb-reg-cantidad" min="1" value="1">
-          </div>
-          <div class="atb-field">
-            <label for="atb-reg-zona">Ciudad / zona donde recolectaste</label>
-            <input type="text" id="atb-reg-zona" placeholder="ej. Yermos cerca de Martlock">
-          </div>
-          <div class="atb-field">
-            <label for="atb-reg-precio">Precio unitario (plata)</label>
-            <div style="display:flex; gap:6px;">
-              <input type="number" id="atb-reg-precio" min="0" style="flex:1;">
-              <button class="atb-btn" id="atb-reg-consultar" style="padding:8px 12px; white-space:nowrap;">Consultar</button>
-            </div>
-          </div>
-        </div>
-        <button class="atb-btn" id="atb-reg-agregar" style="margin-bottom:18px;">Agregar al registro</button>
+        <p class="atb-section-label">Sesión de recolección</p>
+        <div class="atb-tip">Cada salida es una sesión con hora de inicio y de cierre. Dentro de una sesión puedes ir agregando distintos materiales/tiers, y cada uno consulta su precio ACTUAL en vivo (directo a la API, no el precio guardado de hace horas) al momento de agregarlo — así la rentabilidad de la sesión refleja lo que en verdad valía cada material cuando lo sacaste.</div>
+        ${panelSesionActiva}
 
-        <div class="atb-scroll">
-          <table class="atb-table">
-            <thead><tr><th>Item</th><th>Tier</th><th>Cantidad</th><th>Ciudad/zona</th><th>Precio unit.</th><th></th></tr></thead>
-            <tbody>${registroTablaHtml()}</tbody>
-          </table>
-        </div>
-        <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">${totalItems.toLocaleString('es-CO')} unidades registradas · valor de referencia ${Math.round(totalPlata).toLocaleString('es-CO')} plata</p>
+        <p class="atb-section-label">Historial de sesiones cerradas</p>
+        ${historialHtml}
       `;
 
       contentEl.querySelectorAll('[data-add-etapa]').forEach(btn => {
         btn.addEventListener('click', () => {
           const k = btn.getAttribute('data-add-etapa');
+          const maxTier = tierMaxDesbloqueado(k);
           const tiersUsados = new Set((maestrias[k] || []).map(e => e.tier));
-          const siguienteTier = Object.keys(GATHERING_TIER_NAMES[k]).map(Number).find(t => !tiersUsados.has(t));
+          const siguienteTier = Object.keys(GATHERING_TIER_NAMES[k]).map(Number).find(t => !tiersUsados.has(t) && t <= maxTier);
           if (siguienteTier === undefined) return;
           maestrias[k].push({ tier: siguienteTier, nivel: 0 });
           pintar();
@@ -1480,36 +1583,93 @@
           pintar();
         });
       });
+      contentEl.querySelectorAll('[data-rango-recurso]').forEach(sel => {
+        sel.addEventListener('change', () => {
+          const k = sel.getAttribute('data-rango-recurso');
+          rangos[k] = sel.value || null;
+          // Si ya tenías registradas etapas de especialización más altas que tu nuevo rango, se quitan.
+          const maxTier = tierMaxDesbloqueado(k);
+          maestrias[k] = (maestrias[k] || []).filter(e => e.tier <= maxTier);
+          pintar();
+        });
+      });
       document.getElementById('atb-rec-save').addEventListener('click', async () => {
         await fetch('/api/perfil', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ maestria_recoleccion: maestrias }),
+          body: JSON.stringify({ maestria_recoleccion: maestrias, rango_recoleccion: rangos }),
         });
       });
 
-      document.getElementById('atb-reg-consultar').addEventListener('click', () => {
-        const itemId = document.getElementById('atb-reg-item').value;
-        const item = ITEMS_BY_ID_JS(itemId);
-        const recurso = itemId.split('_').slice(1).join('_');
-        const ciudadRefino = REFINING_BONUS_CITY[recurso];
-        const precioRefino = precios.find(p => p.item_id === itemId && p.city === ciudadRefino);
-        document.getElementById('atb-reg-precio').value = precioRefino ? Number(precioRefino.buy_price_max || 0) : '';
-        if (!precioRefino) alert('No hay precio guardado para ese item en ' + ciudadRefino + ' todavía. Usa "Traer últimos precios" en Resumen, o escribe el precio a mano.');
+      const btnIniciar = document.getElementById('atb-ses-iniciar');
+      if (btnIniciar) btnIniciar.addEventListener('click', async () => {
+        const res = await fetch('/api/sesiones-recoleccion', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (res.ok) {
+          sesiones = await (await fetch('/api/sesiones-recoleccion')).json();
+          pintar();
+        }
       });
 
-      document.getElementById('atb-reg-agregar').addEventListener('click', async () => {
+      const btnCerrar = document.getElementById('atb-ses-cerrar');
+      if (btnCerrar) btnCerrar.addEventListener('click', async () => {
+        await fetch('/api/sesiones-recoleccion/' + sesionActiva.id + '/cerrar', { method: 'POST' });
+        sesiones = await (await fetch('/api/sesiones-recoleccion')).json();
+        pintar();
+      });
+
+      contentEl.querySelectorAll('[data-del-ses]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-del-ses');
+          if (!confirm('¿Eliminar esta sesión y todo lo que tiene adentro?')) return;
+          await fetch('/api/sesiones-recoleccion/' + id, { method: 'DELETE' });
+          sesiones = sesiones.filter(s => String(s.id) !== String(id));
+          pintar();
+        });
+      });
+
+      const btnConsultar = document.getElementById('atb-reg-consultar');
+      if (btnConsultar) btnConsultar.addEventListener('click', async () => {
+        const itemId = document.getElementById('atb-reg-item').value;
+        const recurso = itemId.split('_').slice(1).join('_');
+        const ciudadRefino = REFINING_BONUS_CITY[recurso];
+        const infoEl = document.getElementById('atb-reg-consultado-info');
+        infoEl.textContent = 'Consultando precio en vivo...';
+        try {
+          const res = await fetch('/api/precio-vivo/' + itemId);
+          const data = await res.json();
+          if (!res.ok) { infoEl.textContent = data.error || 'No se pudo consultar.'; return; }
+          const fila = (data.precios || []).find(p => p.city === ciudadRefino);
+          if (fila && fila.buy_price_max) {
+            document.getElementById('atb-reg-precio').value = Number(fila.buy_price_max);
+            document.getElementById('atb-reg-precio').dataset.consultadoEn = data.consultado_en;
+            infoEl.textContent = `Precio en vivo de ${ciudadRefino}, consultado justo ahora (${fmtHora(data.consultado_en)}).`;
+          } else {
+            infoEl.textContent = 'La API no devolvió precio de compra para ' + ciudadRefino + ' en este momento. Escríbelo a mano si lo sabes.';
+          }
+        } catch (e) {
+          infoEl.textContent = 'Error consultando el precio en vivo.';
+        }
+      });
+
+      const btnAgregar = document.getElementById('atb-reg-agregar');
+      if (btnAgregar) btnAgregar.addEventListener('click', async () => {
         const item_id = document.getElementById('atb-reg-item').value;
         const cantidad = Number(document.getElementById('atb-reg-cantidad').value) || 1;
         const ciudad_zona = document.getElementById('atb-reg-zona').value;
-        const precio_unitario = document.getElementById('atb-reg-precio').value ? Number(document.getElementById('atb-reg-precio').value) : null;
+        const precioInput = document.getElementById('atb-reg-precio');
+        const precio_unitario = precioInput.value ? Number(precioInput.value) : null;
+        const precio_consultado_en = precioInput.dataset.consultadoEn || null;
         const res = await fetch('/api/recolecciones', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ item_id, cantidad, ciudad_zona, precio_unitario }),
+          body: JSON.stringify({ sesion_id: sesionActiva.id, item_id, cantidad, ciudad_zona, precio_unitario, precio_consultado_en }),
         });
         if (res.ok) {
-          registro = await (await fetch('/api/recolecciones')).json();
+          sesiones = await (await fetch('/api/sesiones-recoleccion')).json();
           pintar();
         }
       });
@@ -1518,13 +1678,11 @@
         btn.addEventListener('click', async () => {
           const id = btn.getAttribute('data-del-reg');
           await fetch('/api/recolecciones/' + id, { method: 'DELETE' });
-          registro = registro.filter(r => String(r.id) !== String(id));
+          sesiones = await (await fetch('/api/sesiones-recoleccion')).json();
           pintar();
         });
       });
     }
-
-    function ITEMS_BY_ID_JS(id) { return ITEMS.find(i => i.id === id); }
 
     pintar();
   }
@@ -1752,6 +1910,2376 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
