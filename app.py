@@ -531,7 +531,16 @@ def fetch_and_store_volume(host):
     """Trae el volumen de transacciones (item_count) desde AODP y lo guarda en
     volumen_historico. item_count = unidades COMPRAVENDIDAS en esa franja, no
     la cantidad disponible en el mercado ahora mismo (Albion no expone eso).
-    Se corre junto al fetch principal, mismo cron cada hora / mismo botón manual."""
+    Se corre junto al fetch principal, mismo cron cada hora / mismo botón manual.
+
+    IMPORTANTE: guardamos la hora REAL de cada punto que reporta AODP (su
+    campo "timestamp"), no la hora en que corrió este cron. Antes solo
+    tomábamos el último punto y lo insertábamos con ts=ahora — si AODP no
+    tenía actividad nueva de ese item, terminábamos re-guardando el mismo
+    valor viejo con una fecha fresca cada vez, y la gráfica mostraba barras
+    idénticas hora tras hora (parecía "volumen constante" siendo en realidad
+    el mismo dato repetido). El upsert de abajo evita duplicar un punto que
+    ya teníamos guardado."""
     item_ids = ",".join(i["id"] for i in ITEMS)
     city_names = ",".join(c["id"] for c in CITIES)
     url = (f"https://{host}/api/v2/stats/history/{item_ids}.json"
@@ -552,17 +561,24 @@ def fetch_and_store_volume(host):
         puntos = rec.get("data") or []
         if not item_id or not city or not puntos:
             continue
-        ultimo = puntos[-1]  # el punto más reciente de la franja pedida
-        rows.append({
-            "item_id": item_id,
-            "city": city,
-            "item_count": ultimo.get("item_count"),
-            "avg_price": ultimo.get("avg_price"),
-        })
+        # AODP puede devolver varias franjas ya calculadas en una sola llamada;
+        # nos quedamos con las últimas 48 (~2 días a time-scale=1) para no
+        # reescanear de más en cada corrida.
+        for punto in puntos[-48:]:
+            ts = punto.get("timestamp")
+            if not ts:
+                continue
+            rows.append({
+                "item_id": item_id,
+                "city": city,
+                "item_count": punto.get("item_count"),
+                "avg_price": punto.get("avg_price"),
+                "ts": ts,
+            })
 
     if rows:
-        supabase.table("volumen_historico").insert(rows).execute()
-        print(f"Guardado volumen para {len(rows)} combinaciones item/ciudad.")
+        supabase.table("volumen_historico").upsert(rows, on_conflict="item_id,city,ts").execute()
+        print(f"Guardado volumen: {len(rows)} puntos (item/ciudad/hora), duplicados ya existentes se ignoran.")
 
 
 def fetch_and_store_mount_prices(host):
@@ -1355,3 +1371,4 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
