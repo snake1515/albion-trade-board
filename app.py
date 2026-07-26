@@ -576,6 +576,15 @@ def fetch_and_store_volume(host):
                 "ts": ts,
             })
 
+    # Postgres rechaza un upsert si DOS filas del mismo lote comparten la
+    # llave del ON CONFLICT ("cannot affect row a second time") — y AODP
+    # a veces sí repite el mismo (item_id, city, ts) dentro de una misma
+    # respuesta. Nos quedamos con una sola fila por llave antes de enviar.
+    dedup = {}
+    for r in rows:
+        dedup[(r["item_id"], r["city"], r["ts"])] = r
+    rows = list(dedup.values())
+
     if rows:
         supabase.table("volumen_historico").upsert(rows, on_conflict="item_id,city,ts").execute()
         print(f"Guardado volumen: {len(rows)} puntos (item/ciudad/hora), duplicados ya existentes se ignoran.")
@@ -1371,4 +1380,6 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
 
