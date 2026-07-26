@@ -1696,7 +1696,7 @@
 
     function itemsSesionTablaHtml(sesion) {
       const items = sesion.registro_recoleccion || [];
-      if (!items.length) return '<tr><td colspan="7">Sin materiales agregados a esta sesión todavía.</td></tr>';
+      if (!items.length) return '<tr><td colspan="8">Sin materiales agregados a esta sesión todavía.</td></tr>';
       return items.map(r => `
         <tr>
           <td>${itemIcon(r.item_id)}${r.item_name}</td>
@@ -1704,6 +1704,7 @@
           <td>${Number(r.cantidad).toLocaleString('es-CO')}</td>
           <td>${r.ciudad_zona || '—'}</td>
           <td>${r.precio_unitario ? Number(r.precio_unitario).toLocaleString('es-CO') : '—'}</td>
+          <td>${r.precio_total ? Number(r.precio_total).toLocaleString('es-CO') : '—'}</td>
           <td>${r.precio_consultado_en ? fmtHora(r.precio_consultado_en) : '<span style="color:var(--text-muted);">manual</span>'}</td>
           <td><button class="atb-event-del" data-del-reg="${r.id}">Eliminar</button></td>
         </tr>`).join('');
@@ -1766,7 +1767,7 @@
 
           <div class="atb-scroll" style="margin-top:14px;">
             <table class="atb-table">
-              <thead><tr><th>Item</th><th>Tier</th><th>Cantidad</th><th>Ciudad/zona</th><th>Precio unit.</th><th>Precio consultado</th><th></th></tr></thead>
+              <thead><tr><th>Item</th><th>Tier</th><th>Cantidad</th><th>Ciudad/zona</th><th>Precio unit.</th><th>Precio total</th><th>Precio consultado</th><th></th></tr></thead>
               <tbody>${itemsSesionTablaHtml(sesionActiva)}</tbody>
             </table>
           </div>
@@ -1802,7 +1803,7 @@
 
           <div class="atb-scroll" style="margin-top:12px;">
             <table class="atb-table">
-              <thead><tr><th>Item</th><th>Tier</th><th>Cantidad</th><th>Ciudad/zona</th><th>Precio unit.</th><th>Precio consultado</th><th></th></tr></thead>
+              <thead><tr><th>Item</th><th>Tier</th><th>Cantidad</th><th>Ciudad/zona</th><th>Precio unit.</th><th>Precio total</th><th>Precio consultado</th><th></th></tr></thead>
               <tbody>${itemsSesionTablaHtml(s)}</tbody>
             </table>
           </div>
@@ -2031,14 +2032,23 @@
           const precioInput = document.getElementById('atb-reg-precio-' + sesId);
           const valorIngresado = precioInput.value ? Number(precioInput.value) : null;
           // Si el usuario ingresó el valor total del lote, se divide entre la
-          // cantidad para guardar siempre el precio unitario en la base de datos.
-          const precio_unitario = valorIngresado === null ? null
-            : (modoEl.value === 'total' ? valorIngresado / cantidad : valorIngresado);
+          // cantidad para guardar el precio unitario — pero el total tal cual
+          // lo escribió también se guarda, no se pierde.
+          let precio_unitario = null, precio_total = null;
+          if (valorIngresado !== null) {
+            if (modoEl.value === 'total') {
+              precio_total = valorIngresado;
+              precio_unitario = cantidad > 0 ? valorIngresado / cantidad : null;
+            } else {
+              precio_unitario = valorIngresado;
+              precio_total = valorIngresado * cantidad;
+            }
+          }
           const precio_consultado_en = precioInput.dataset.consultadoEn || null;
           const res = await fetch('/api/recolecciones', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sesion_id: Number(sesId), item_id, cantidad, ciudad_zona, precio_unitario, precio_consultado_en }),
+            body: JSON.stringify({ sesion_id: Number(sesId), item_id, cantidad, ciudad_zona, precio_unitario, precio_total, precio_consultado_en }),
           });
           if (res.ok) {
             sesiones = await (await fetch('/api/sesiones-recoleccion')).json();
