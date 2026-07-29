@@ -1092,7 +1092,6 @@ def api_ordenes_delete(orden_id):
     return jsonify({"deleted": True})
 
 
-@app.route("/api/compras", methods=["GET", "POST"])
 def _ganancia_venta(venta, precio_oro):
     """Ganancia de una venta parcial, calculada siempre al vuelo a partir del
     precio_venta guardado — así, si editas el precio de una venta pendiente,
@@ -1102,6 +1101,7 @@ def _ganancia_venta(venta, precio_oro):
     return round((precio_venta_neto - float(precio_oro)) * float(venta["cantidad"]), 2)
 
 
+@app.route("/api/compras", methods=["GET", "POST"])
 def api_compras():
     if request.method == "POST":
         body = request.get_json()
@@ -1512,3 +1512,4 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
