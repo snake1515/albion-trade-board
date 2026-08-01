@@ -1118,6 +1118,7 @@ def api_compras():
             "precio_oro": body["precio_oro"],
             "cantidad": body.get("cantidad", 1),
             "nota": body.get("nota") or None,
+            "origen": body.get("origen") if body.get("origen") in ("compra", "recoleccion") else "compra",
         }
         res = supabase.table("compras_manual").insert(nueva).execute()
         return jsonify(res.data), 201
@@ -1457,6 +1458,38 @@ def api_recolecciones_delete(reg_id):
     return jsonify({"deleted": True})
 
 
+@app.route("/api/recolecciones/<int:reg_id>/vender", methods=["POST"])
+def api_recolecciones_vender(reg_id):
+    """Marca un material recolectado como vendido, con el precio REAL logrado
+    (no el estimado que se guardó al recolectarlo). No usa capital de
+    inversión — esto es ingreso de farmeo, se cuenta aparte en Inversión."""
+    body = request.get_json(silent=True) or {}
+    precio_venta_real = body.get("precio_venta_real")
+    if precio_venta_real is None or float(precio_venta_real) < 0:
+        return jsonify({"error": "precio_venta_real requerido"}), 400
+    res = supabase.table("registro_recoleccion").update({
+        "estado": "vendido",
+        "precio_venta_real": float(precio_venta_real),
+        "fecha_vendida": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", reg_id).execute()
+    if not res.data:
+        return jsonify({"error": "no encontrado"}), 404
+    return jsonify(res.data)
+
+
+@app.route("/api/recolecciones/<int:reg_id>/revertir", methods=["POST"])
+def api_recolecciones_revertir(reg_id):
+    """Por si marcaste una venta por error — la regresa a 'pendiente'."""
+    res = supabase.table("registro_recoleccion").update({
+        "estado": "pendiente",
+        "precio_venta_real": None,
+        "fecha_vendida": None,
+    }).eq("id", reg_id).execute()
+    if not res.data:
+        return jsonify({"error": "no encontrado"}), 404
+    return jsonify(res.data)
+
+
 @app.route("/api/precio-vivo/<item_id>")
 def api_precio_vivo(item_id):
     """Consulta el precio ACTUAL directo a la API del Albion Data Project para
@@ -1546,6 +1579,7 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
 
 
 
