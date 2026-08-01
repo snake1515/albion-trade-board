@@ -253,6 +253,7 @@
 
   <div class="atb-tabs">
     <button class="atb-tab active" data-tab="resumen">Resumen</button>
+    <button class="atb-tab" data-tab="inversion">Inversión</button>
 
     <div class="atb-tab-group" data-group="mercado">
       <button class="atb-tab-group-btn" type="button">Mercado <span class="atb-caret">▾</span></button>
@@ -707,6 +708,7 @@
 
   function render() {
     if (activeTab === 'resumen') { renderResumen(); return; }
+    if (activeTab === 'inversion') { renderInversion(); return; }
     if (activeTab === 'history') { renderHistory(); return; }
     if (activeTab === 'precios-hist') { renderPreciosHistorico(); return; }
     if (activeTab === 'events') { renderEvents(); return; }
@@ -2737,6 +2739,127 @@
   function linkifyNotas(texto) {
     if (!texto) return '';
     return texto.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--teal);">$1</a>');
+  }
+
+  async function renderInversion() {
+    contentEl.innerHTML = '<div class="atb-empty">Cargando capital de inversión...</div>';
+    const [capitalRes, comprasRes] = await Promise.all([fetch('/api/capital'), fetch('/api/compras')]);
+    const movimientos = await capitalRes.json();
+    const compras = await comprasRes.json();
+
+    // Capital total que le has dedicado a esto (aportes menos retiros del ledger).
+    const capitalAportado = movimientos.reduce((s, m) => s + (m.tipo === 'aporte' ? Number(m.monto) : -Number(m.monto)), 0);
+
+    // Capital comprometido = plata metida en compras activas que todavía no
+    // volvió como efectivo (ni sin listar, ni listada-sin-confirmar). Las
+    // compras canceladas no cuentan — esa plata nunca salió de verdad.
+    const comprasActivas = compras.filter(c => c.estado !== 'cancelado');
+    const capitalComprometido = comprasActivas.reduce((s, c) => {
+      const cantidadSinRecuperar = Number(c.cantidad_restante) + Number(c.cantidad_pendiente_venta || 0);
+      return s + Number(c.precio_oro) * cantidadSinRecuperar;
+    }, 0);
+
+    // Ganancia ya realizada (ventas confirmadas) y estimada (listadas, sin confirmar todavía).
+    const gananciaRealizada = compras.reduce((s, c) => s + Number(c.ganancia_acumulada || 0), 0);
+    const gananciaPendiente = compras.reduce((s, c) => s + Number(c.ganancia_pendiente_estimada || 0), 0);
+
+    // Lo que te queda libre para comprar algo nuevo ahora mismo.
+    const capitalDisponible = capitalAportado - capitalComprometido + gananciaRealizada;
+
+    const movRows = movimientos.map(m => {
+      const fecha = m.fecha ? new Date(m.fecha).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+      const esAporte = m.tipo === 'aporte';
+      return `
+        <div style="display:flex; align-items:center; gap:10px; padding:8px 0; font-size:12px; border-top:1px solid var(--hairline); flex-wrap:wrap;">
+          <span style="color:var(--text-muted); width:80px;">${fecha}</span>
+          <span class="atb-rent-badge ${esAporte ? 'atb-rent-ok' : 'atb-rent-bad'}" style="font-size:10px;">${esAporte ? 'Aporte' : 'Retiro'}</span>
+          <span style="font-weight:600; color:${esAporte ? '#7fc9a3' : '#d97a7a'};">${esAporte ? '+' : '-'}${Math.round(m.monto).toLocaleString('es-CO')}</span>
+          <span style="color:var(--text-muted); flex:1; min-width:120px;">${m.nota || ''}</span>
+          <button class="atb-event-del atb-capital-del" data-id="${m.id}">Borrar</button>
+        </div>`;
+    }).join('');
+
+    contentEl.innerHTML = `
+      <div class="atb-tip">
+        <strong>Cómo leer esto:</strong> esta pestaña no reemplaza "Mis compras" — la resume desde el ángulo del
+        capital. "Aportes/retiros" es la plata que tú decides dedicarle a esto (ej. convertir oro a plata).
+        "Comprometido" es lo que ya está metido en compras activas sin vender. "Disponible" es lo que te queda
+        libre para comprar algo nuevo ahora mismo, contando la ganancia que ya recuperaste.
+      </div>
+
+      <div class="atb-summary-grid" style="margin-top:16px;">
+        <div class="atb-summary-card">
+          <h3>Capital aportado (neto)</h3>
+          <div class="atb-summary-value">${Math.round(capitalAportado).toLocaleString('es-CO')}</div>
+          <div class="atb-summary-sub">${movimientos.filter(m => m.tipo === 'aporte').length} aporte(s), ${movimientos.filter(m => m.tipo === 'retiro').length} retiro(s)</div>
+        </div>
+        <div class="atb-summary-card">
+          <h3>Comprometido en compras activas</h3>
+          <div class="atb-summary-value">${Math.round(capitalComprometido).toLocaleString('es-CO')}</div>
+          <div class="atb-summary-sub">${comprasActivas.filter(c => !c.vendido).length} compra(s) sin vender por completo</div>
+        </div>
+        <div class="atb-summary-card">
+          <h3>Ganancia realizada</h3>
+          <div class="atb-summary-value" style="color:${gananciaRealizada >= 0 ? '#7fc9a3' : '#d97a7a'};">${gananciaRealizada >= 0 ? '+' : ''}${Math.round(gananciaRealizada).toLocaleString('es-CO')}</div>
+          <div class="atb-summary-sub">${gananciaPendiente !== 0 ? `+${Math.round(gananciaPendiente).toLocaleString('es-CO')} más si se confirman las ventas listadas` : 'Solo ventas ya confirmadas'}</div>
+        </div>
+        <div class="atb-summary-card" style="border-color:var(--gold);">
+          <h3>Capital disponible</h3>
+          <div class="atb-summary-value" style="color:var(--gold-bright);">${Math.round(capitalDisponible).toLocaleString('es-CO')}</div>
+          <div class="atb-summary-sub">Libre para invertir en algo nuevo ahora mismo</div>
+        </div>
+      </div>
+
+      <div class="atb-panel" style="margin-top:20px;">
+        <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; display:block; margin-bottom:10px;">
+          Registrar aporte o retiro de capital
+        </label>
+        <div class="atb-event-form">
+          <div class="atb-field">
+            <label for="atb-cap-tipo">Tipo</label>
+            <select id="atb-cap-tipo"><option value="aporte">Aporte</option><option value="retiro">Retiro</option></select>
+          </div>
+          <div class="atb-field">
+            <label for="atb-cap-monto">Monto (plata)</label>
+            <input type="number" id="atb-cap-monto" min="1" placeholder="Ej: 2521920">
+          </div>
+          <div class="atb-field" style="flex:1; min-width:200px;">
+            <label for="atb-cap-nota">Nota</label>
+            <input type="text" id="atb-cap-nota" placeholder="Ej: conversión inicial de 320 oro">
+          </div>
+          <button class="atb-btn" id="atb-cap-add">Registrar</button>
+        </div>
+      </div>
+
+      <div class="atb-panel" style="margin-top:16px;">
+        <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; display:block; margin-bottom:6px;">
+          Historial de movimientos
+        </label>
+        ${movRows || '<div class="atb-empty">Todavía no has registrado ningún aporte o retiro.</div>'}
+      </div>
+    `;
+
+    document.getElementById('atb-cap-add').addEventListener('click', async () => {
+      const monto = Number(document.getElementById('atb-cap-monto').value);
+      if (!monto || monto <= 0) return;
+      await fetch('/api/capital', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tipo: document.getElementById('atb-cap-tipo').value,
+          monto,
+          nota: document.getElementById('atb-cap-nota').value.trim(),
+        }),
+      });
+      renderInversion();
+    });
+
+    contentEl.querySelectorAll('.atb-capital-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch('/api/capital/' + btn.dataset.id, { method: 'DELETE' });
+        renderInversion();
+      });
+    });
   }
 
   async function renderEvents() {
