@@ -1010,19 +1010,21 @@
         : c.city;
       const estado = estadoRentabilidad(c);
       const estadoCell = c.vendido
-        ? `<span class="atb-rent-badge atb-rent-ok">Vendida por completo</span>`
-        : (estado.sinDatos
-          ? `<div style="color:var(--text-muted); font-size:11px;">${estado.label}<br>${estado.detalle}</div>`
-          : `
-            <div style="margin-bottom:6px;">
-              <span class="atb-rent-badge ${estado.instantanea.cls}">${estado.instantanea.label}</span>
-              <div style="color:var(--text-muted); font-size:10px; margin-top:2px;">${estado.instantanea.detalle || ''}</div>
-            </div>
-            <div>
-              <span class="atb-rent-badge ${estado.listada.cls}">${estado.listada.label}</span>
-              <div style="color:var(--text-muted); font-size:10px; margin-top:2px;">${estado.listada.detalle || ''}</div>
-            </div>
-          `);
+        ? `<span class="atb-rent-badge atb-rent-ok">Ejecución total</span>`
+        : `
+          <div style="margin-bottom:6px;"><span class="atb-rent-badge atb-rent-warn">Pendiente por ejecutar</span></div>
+          ${estado.sinDatos
+            ? `<div style="color:var(--text-muted); font-size:11px;">${estado.label}<br>${estado.detalle}</div>`
+            : `
+              <div style="margin-bottom:6px;">
+                <span class="atb-rent-badge ${estado.instantanea.cls}">${estado.instantanea.label}</span>
+                <div style="color:var(--text-muted); font-size:10px; margin-top:2px;">${estado.instantanea.detalle || ''}</div>
+              </div>
+              <div>
+                <span class="atb-rent-badge ${estado.listada.cls}">${estado.listada.label}</span>
+                <div style="color:var(--text-muted); font-size:10px; margin-top:2px;">${estado.listada.detalle || ''}</div>
+              </div>
+            `}`;
       const cantidadCell = (Number(c.cantidad_vendida) > 0 || pendienteVenta > 0)
         ? `${restanteSinListar} <span style="color:var(--text-muted); font-size:10px;">sin listar de ${c.cantidad}</span>${pendienteVenta > 0 ? `<div style="color:#e0a53a; font-size:10px;">${pendienteVenta} listadas, sin confirmar</div>` : ''}`
         : `${c.cantidad}`;
@@ -1039,7 +1041,8 @@
       const gananciaTag = c.ventas && c.ventas.length
         ? `<div style="font-size:10px; margin-top:4px; color:${gananciaAcum >= 0 ? '#7fc9a3' : '#d97a7a'};">${gananciaAcum >= 0 ? '+' : ''}${Math.round(gananciaAcum).toLocaleString('es-CO')} confirmada${pendienteVenta > 0 ? `<br><span style="color:var(--text-muted);">${gananciaPend >= 0 ? '+' : ''}${Math.round(gananciaPend).toLocaleString('es-CO')} estimada (pendiente)</span>` : ''}</div>`
         : '';
-      const nombreCell = `${itemIcon(c.item_id)}${c.item_name}${cancelada ? '<div><span class="atb-rent-badge atb-rent-bad" style="font-size:10px; margin-top:4px;">Cancelada</span></div>' : ''}`;
+      const esRecoleccion = c.origen === 'recoleccion';
+      const nombreCell = `${itemIcon(c.item_id)}${c.item_name}${esRecoleccion ? '<div><span class="atb-rent-badge" style="font-size:10px; margin-top:4px; color:var(--teal); border-color:var(--teal); background:rgba(0,0,0,0);">Recolectado — no usa capital</span></div>' : ''}${cancelada ? '<div><span class="atb-rent-badge atb-rent-bad" style="font-size:10px; margin-top:4px;">Cancelada</span></div>' : ''}`;
       return `
         <tr>
           <td class="atb-item-name">${nombreCell}</td>
@@ -1082,6 +1085,12 @@
         <div class="atb-field"><label for="atb-compra-city">Ciudad actual / destino</label><select id="atb-compra-city">${cityOptions}</select></div>
         <div class="atb-field"><label for="atb-compra-precio">Precio pagado (oro, c/u)</label><input type="number" id="atb-compra-precio" min="0"></div>
         <div class="atb-field"><label for="atb-compra-cantidad">Cantidad</label><input type="number" id="atb-compra-cantidad" value="1" min="1"></div>
+        <div class="atb-field"><label for="atb-compra-origen">Origen</label>
+          <select id="atb-compra-origen">
+            <option value="compra">Comprado (usa capital de inversión)</option>
+            <option value="recoleccion">Recolectado (no usa capital)</option>
+          </select>
+        </div>
         <div class="atb-field" style="grid-column: span 2;"><label for="atb-compra-nota">Nota (opcional)</label><input type="text" id="atb-compra-nota" placeholder="ej. para craftear, para vender en Caerleon..."></div>
         <div class="atb-field" style="grid-column: span 2; flex-direction:row; align-items:center; gap:18px;">
           <label style="display:flex; align-items:center; gap:6px; font-weight:600; cursor:pointer;">
@@ -1119,7 +1128,7 @@
         </div>
       </div>
 
-      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:18px 0 8px;">Vendidas por completo (${vendidas.length})</p>
+      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:18px 0 8px;">Ejecución total (${vendidas.length})</p>
       <table class="atb-table"><thead><tr><th>Item</th><th>Ruta (compra → actual)</th><th>Precio compra c/u</th><th>Cant.</th><th>Total invertido</th><th>Nota</th><th>Estado</th><th></th><th></th></tr></thead>
       <tbody>${vendidas.map(c => rowCompra(c)).join('') || '<tr><td colspan="9" class="atb-empty">Todavía ninguna vendida por completo.</td></tr>'}</tbody></table>
     `;
@@ -1131,12 +1140,13 @@
 
     document.getElementById('atb-compra-add').addEventListener('click', async () => {
       const precio_oro = Number(document.getElementById('atb-compra-precio').value);
-      if (!precio_oro) return;
+      if (isNaN(precio_oro) || precio_oro < 0) return;
       const item_id = document.getElementById('atb-compra-item').value;
       const city_compra = document.getElementById('atb-compra-city-compra').value;
       const city = document.getElementById('atb-compra-city').value;
       const cantidad = Number(document.getElementById('atb-compra-cantidad').value) || 1;
       const nota = document.getElementById('atb-compra-nota').value.trim();
+      const origen = document.getElementById('atb-compra-origen').value;
 
       if (!city_compra || !city) {
         alert('Selecciona la ciudad de compra y la ciudad actual/destino antes de agregar.');
@@ -1158,7 +1168,7 @@
       await fetch('/api/compras', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item_id, city_compra, city, precio_oro, cantidad, nota }),
+        body: JSON.stringify({ item_id, city_compra, city, precio_oro, cantidad, nota, origen }),
       });
       renderCompras();
     });
@@ -1815,23 +1825,54 @@
       const plataNeta = plataBruta * (1 - impuesto / 100);
       const costoReparacion = Number(sesion.costo_reparacion || 0);
       const plataNetaFinal = plataNeta - costoReparacion;
-      return { totalItems, plataBruta, plataNeta, costoReparacion, plataNetaFinal };
+
+      // Real = solo lo que de verdad se marcó "vendido", con el precio que de
+      // verdad se logró — no el estimado. Es lo que cuenta para Inversión.
+      const vendidos = items.filter(r => r.estado === 'vendido');
+      const pendientesVender = items.filter(r => r.estado !== 'vendido');
+      const plataRealBruta = vendidos.reduce((acc, r) => acc + Number(r.cantidad || 0) * Number(r.precio_venta_real || 0), 0);
+      const plataRealNeta = plataRealBruta * (1 - impuesto / 100);
+
+      return { totalItems, plataBruta, plataNeta, costoReparacion, plataNetaFinal, plataRealBruta, plataRealNeta, cantVendidos: vendidos.length, cantPendientes: pendientesVender.length };
     }
 
     function itemsSesionTablaHtml(sesion) {
       const items = sesion.registro_recoleccion || [];
-      if (!items.length) return '<tr><td colspan="8">Sin materiales agregados a esta sesión todavía.</td></tr>';
-      return items.map(r => `
+      if (!items.length) return '<tr><td colspan="9">Sin materiales agregados a esta sesión todavía.</td></tr>';
+      return items.map(r => {
+        const recurso = recursoFromItemId(r.item_id);
+        const ciudadRefino = REFINING_BONUS_CITY[recurso];
+        const precioMercadoRow = precios.find(p => p.item_id === r.item_id && p.city === ciudadRefino);
+        const precioMercado = precioMercadoRow ? Number(precioMercadoRow.buy_price_max || 0) : null;
+        const vendido = r.estado === 'vendido';
+        const estadoCell = vendido
+          ? `<span class="atb-rent-badge atb-rent-ok">Ejecución total</span>`
+          : `<span class="atb-rent-badge atb-rent-warn">Pendiente por ejecutar</span>`;
+        const ventaCell = vendido
+          ? `
+            <div style="font-size:11px;">
+              <span style="color:#7fc9a3; font-weight:600;">${Number(r.precio_venta_real).toLocaleString('es-CO')} c/u</span>
+              <div style="color:var(--text-muted); margin-top:2px;">${fmtHora(r.fecha_vendida)}</div>
+              <button class="atb-event-del atb-reg-revertir" data-id="${r.id}" style="margin-top:4px;">Revertir a pendiente</button>
+            </div>`
+          : `
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input type="number" class="atb-reg-precio-venta" data-id="${r.id}" min="0" placeholder="precio c/u" value="${precioMercado ?? ''}" style="width:90px;">
+              <button class="atb-btn atb-reg-vender" data-id="${r.id}" style="padding:5px 10px; font-size:11px;">Vender</button>
+            </div>`;
+        return `
         <tr>
           <td>${itemIcon(r.item_id)}${r.item_name}</td>
           <td><span class="atb-tier-pill">T${r.tier}</span></td>
           <td>${Number(r.cantidad).toLocaleString('es-CO')}</td>
           <td>${r.ciudad_zona || '—'}</td>
           <td>${r.precio_unitario ? Number(r.precio_unitario).toLocaleString('es-CO') : '—'}</td>
-          <td>${r.precio_total ? Number(r.precio_total).toLocaleString('es-CO') : '—'}</td>
-          <td>${r.precio_consultado_en ? fmtHora(r.precio_consultado_en) : '<span style="color:var(--text-muted);">manual</span>'}</td>
-          <td><button class="atb-event-del" data-del-reg="${r.id}">Eliminar</button></td>
-        </tr>`).join('');
+          <td>${precioMercado ? precioMercado.toLocaleString('es-CO') + ` <span style="color:var(--text-muted); font-size:10px;">(${ciudadRefino})</span>` : '<span style="color:var(--text-muted);">sin dato</span>'}</td>
+          <td>${estadoCell}</td>
+          <td>${ventaCell}</td>
+          <td>${vendido ? '' : `<button class="atb-event-del" data-del-reg="${r.id}">Eliminar</button>`}</td>
+        </tr>`;
+      }).join('');
     }
 
     // Formulario para agregar un material a una sesión — se usa tanto para la
@@ -1893,11 +1934,11 @@
 
               <div class="atb-scroll" style="margin-top:14px;">
                 <table class="atb-table">
-                  <thead><tr><th>Item</th><th>Tier</th><th>Cantidad</th><th>Ciudad/zona</th><th>Precio unit.</th><th>Precio total</th><th>Precio consultado</th><th></th></tr></thead>
+                  <thead><tr><th>Item</th><th>Tier</th><th>Cantidad</th><th>Ciudad/zona</th><th>Estimado (unit)</th><th>Mercado ahora</th><th>Estado</th><th>Registrar venta</th><th></th></tr></thead>
                   <tbody>${itemsSesionTablaHtml(sesionActiva)}</tbody>
                 </table>
               </div>
-              ${(() => { const t = totalesSesion(sesionActiva); return `<p style="font-size:12px; color:var(--text-muted); margin-top:8px;">${t.totalItems.toLocaleString('es-CO')} unidades · bruto ${Math.round(t.plataBruta).toLocaleString('es-CO')} plata · neto (post-impuesto) ${Math.round(t.plataNeta).toLocaleString('es-CO')} plata</p>`; })()}
+              ${(() => { const t = totalesSesion(sesionActiva); return `<p style="font-size:12px; color:var(--text-muted); margin-top:8px;">${t.totalItems.toLocaleString('es-CO')} unidades · estimado bruto ${Math.round(t.plataBruta).toLocaleString('es-CO')} plata (neto ${Math.round(t.plataNeta).toLocaleString('es-CO')})<br><span style="color:${t.cantVendidos ? '#7fc9a3' : 'var(--text-muted)'};">Vendido real: ${Math.round(t.plataRealNeta).toLocaleString('es-CO')} plata (${t.cantVendidos} de ${t.cantVendidos + t.cantPendientes} items ejecutados)</span></p>`; })()}
             </div>
           </details>
         </div>
@@ -1921,7 +1962,7 @@
                 <span style="font-size:11.5px; color:var(--text-muted); margin-left:8px;">${duracionTexto(horas)} · ${t.totalItems.toLocaleString('es-CO')} unidades</span>
               </span>
               <span style="display:flex; align-items:center; gap:12px;">
-                <strong style="font-size:13px; color:${t.plataNetaFinal >= 0 ? '#7fc9a3' : '#d97a7a'};">${Math.round(t.plataNetaFinal).toLocaleString('es-CO')} plata${plataHora ? ` <span style="color:var(--text-muted); font-weight:400; font-size:11px;">(${Math.round(plataHora).toLocaleString('es-CO')}/h)</span>` : ''}</strong>
+                <strong style="font-size:13px; color:${t.plataNetaFinal >= 0 ? '#7fc9a3' : '#d97a7a'};">${Math.round(t.plataNetaFinal).toLocaleString('es-CO')} plata <span style="font-weight:400; font-size:10px; color:var(--text-muted);">est.</span>${plataHora ? ` <span style="color:var(--text-muted); font-weight:400; font-size:11px;">(${Math.round(plataHora).toLocaleString('es-CO')}/h)</span>` : ''}</strong>
                 <button class="atb-event-del" data-del-ses="${s.id}">Eliminar sesión</button>
               </span>
             </summary>
@@ -1936,14 +1977,15 @@
 
               <div class="atb-scroll">
                 <table class="atb-table">
-                  <thead><tr><th>Item</th><th>Tier</th><th>Cantidad</th><th>Ciudad/zona</th><th>Precio unit.</th><th>Precio total</th><th>Precio consultado</th><th></th></tr></thead>
+                  <thead><tr><th>Item</th><th>Tier</th><th>Cantidad</th><th>Ciudad/zona</th><th>Estimado (unit)</th><th>Mercado ahora</th><th>Estado</th><th>Registrar venta</th><th></th></tr></thead>
                   <tbody>${itemsSesionTablaHtml(s)}</tbody>
                 </table>
               </div>
 
               <p style="font-size:11.5px; color:var(--text-muted); margin:8px 0 0;">
-                Bruto ${Math.round(t.plataBruta).toLocaleString('es-CO')} · neto post-impuesto ${Math.round(t.plataNeta).toLocaleString('es-CO')}
+                Estimado bruto ${Math.round(t.plataBruta).toLocaleString('es-CO')} · neto post-impuesto ${Math.round(t.plataNeta).toLocaleString('es-CO')}
                 ${t.costoReparacion > 0 ? ` · reparación <span style="color:#d97a7a;">-${Math.round(t.costoReparacion).toLocaleString('es-CO')}</span>` : ''}
+                <br><span style="color:${t.cantVendidos ? '#7fc9a3' : 'var(--text-muted)'};">Vendido real: ${Math.round(t.plataRealNeta).toLocaleString('es-CO')} plata (${t.cantVendidos} de ${t.cantVendidos + t.cantPendientes} items ejecutados)</span>
               </p>
               <div style="display:flex; align-items:center; gap:8px; margin:6px 0 0;">
                 <label style="font-size:11px; color:var(--text-muted);" for="atb-ses-rep-${s.id}">Gasto de reparación (agrégalo al final):</label>
@@ -2196,6 +2238,30 @@
         btn.addEventListener('click', async () => {
           const id = btn.getAttribute('data-del-reg');
           await fetch('/api/recolecciones/' + id, { method: 'DELETE' });
+          sesiones = await (await fetch('/api/sesiones-recoleccion')).json();
+          pintar();
+        });
+      });
+
+      contentEl.querySelectorAll('.atb-reg-vender').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.id;
+          const input = contentEl.querySelector(`.atb-reg-precio-venta[data-id="${id}"]`);
+          const precio_venta_real = Number(input ? input.value : NaN);
+          if (isNaN(precio_venta_real) || precio_venta_real < 0) { alert('Ingresa un precio de venta válido.'); return; }
+          await fetch('/api/recolecciones/' + id + '/vender', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ precio_venta_real }),
+          });
+          sesiones = await (await fetch('/api/sesiones-recoleccion')).json();
+          pintar();
+        });
+      });
+
+      contentEl.querySelectorAll('.atb-reg-revertir').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await fetch('/api/recolecciones/' + btn.dataset.id + '/revertir', { method: 'POST' });
           sesiones = await (await fetch('/api/sesiones-recoleccion')).json();
           pintar();
         });
@@ -2743,39 +2809,95 @@
 
   async function renderInversion() {
     contentEl.innerHTML = '<div class="atb-empty">Cargando capital de inversión...</div>';
-    const [capitalRes, comprasRes] = await Promise.all([fetch('/api/capital'), fetch('/api/compras')]);
+    const [capitalRes, comprasRes, sesionesRes] = await Promise.all([fetch('/api/capital'), fetch('/api/compras'), fetch('/api/sesiones-recoleccion')]);
     const movimientos = await capitalRes.json();
     const compras = await comprasRes.json();
+    const sesionesRecoleccion = await sesionesRes.json();
+
+    // Solo cuenta lo que de verdad usó tu capital de inversión: compras
+    // activas (no canceladas) con origen "compra". Lo recolectado (origen
+    // "recoleccion") se sigue viendo normal en "Mis compras", pero no mueve
+    // ni un peso de este capital — no lo pagaste con esta plata.
+    const comprasCapital = compras.filter(c => (c.origen || 'compra') === 'compra' && c.estado !== 'cancelado');
+    const comprasRecoleccion = compras.filter(c => c.origen === 'recoleccion');
 
     // Capital total que le has dedicado a esto (aportes menos retiros del ledger).
     const capitalAportado = movimientos.reduce((s, m) => s + (m.tipo === 'aporte' ? Number(m.monto) : -Number(m.monto)), 0);
 
     // Capital comprometido = plata metida en compras activas que todavía no
-    // volvió como efectivo (ni sin listar, ni listada-sin-confirmar). Las
-    // compras canceladas no cuentan — esa plata nunca salió de verdad.
-    const comprasActivas = compras.filter(c => c.estado !== 'cancelado');
-    const capitalComprometido = comprasActivas.reduce((s, c) => {
+    // volvió como efectivo (ni sin listar, ni listada-sin-confirmar).
+    const capitalComprometido = comprasCapital.reduce((s, c) => {
       const cantidadSinRecuperar = Number(c.cantidad_restante) + Number(c.cantidad_pendiente_venta || 0);
       return s + Number(c.precio_oro) * cantidadSinRecuperar;
     }, 0);
 
-    // Ganancia ya realizada (ventas confirmadas) y estimada (listadas, sin confirmar todavía).
-    const gananciaRealizada = compras.reduce((s, c) => s + Number(c.ganancia_acumulada || 0), 0);
-    const gananciaPendiente = compras.reduce((s, c) => s + Number(c.ganancia_pendiente_estimada || 0), 0);
+    // Ganancia ya realizada (ventas confirmadas) y estimada (listadas, sin confirmar todavía) — SOLO de compras hechas con capital.
+    const gananciaRealizada = comprasCapital.reduce((s, c) => s + Number(c.ganancia_acumulada || 0), 0);
+    const gananciaPendiente = comprasCapital.reduce((s, c) => s + Number(c.ganancia_pendiente_estimada || 0), 0);
 
     // Lo que te queda libre para comprar algo nuevo ahora mismo.
     const capitalDisponible = capitalAportado - capitalComprometido + gananciaRealizada;
 
-    const movRows = movimientos.map(m => {
+    // Ganancia de lo recolectado, mostrada aparte para que no se pierda de vista —
+    // es plata real, solo que no es "retorno de tu capital", es ingreso de farmeo.
+    // Se suma de dos fuentes: lo vendido directo desde la pestaña Recolección
+    // (el flujo normal) y, por si acaso, lo que se haya registrado como
+    // "recolectado" desde Mis compras (flujo anterior, se sigue soportando).
+    const impuestoActual = Number(config.impuesto ?? 4);
+    const itemsRecoleccionVendidos = sesionesRecoleccion.flatMap(s => (s.registro_recoleccion || []).filter(r => r.estado === 'vendido'));
+    const gananciaRecoleccionSesiones = itemsRecoleccionVendidos.reduce((s, r) => s + Number(r.cantidad || 0) * Number(r.precio_venta_real || 0) * (1 - impuestoActual / 100), 0);
+    const gananciaRecoleccionCompras = comprasRecoleccion.reduce((s, c) => s + Number(c.ganancia_acumulada || 0), 0);
+    const gananciaRecoleccion = gananciaRecoleccionSesiones + gananciaRecoleccionCompras;
+
+    // --- Historial de movimientos: fusiona tus aportes/retiros manuales con
+    // cada compra (sale capital) y cada venta CONFIRMADA (vuelve capital),
+    // para que se vea todo en una sola línea de tiempo sin tener que
+    // registrar nada dos veces. Solo entra lo que usa capital (origen "compra").
+    const eventosAuto = [];
+    comprasCapital.forEach(c => {
+      eventosAuto.push({
+        fecha: c.fecha_creacion,
+        tipo: 'compra',
+        monto: -(Number(c.precio_oro) * Number(c.cantidad)),
+        nota: `Compra: ${c.item_name} ×${c.cantidad} en ${c.city}`,
+      });
+      (c.ventas || []).filter(v => v.estado === 'vendida').forEach(v => {
+        const precioNeto = Number(v.precio_venta) * (1 - Number(v.tax_pct || 0) / 100);
+        eventosAuto.push({
+          fecha: v.fecha_vendida || v.fecha,
+          tipo: 'venta',
+          monto: precioNeto * Number(v.cantidad),
+          nota: `Venta: ${c.item_name} ×${v.cantidad} en ${c.city}`,
+        });
+      });
+    });
+    const movimientosManual = movimientos.map(m => ({
+      id: m.id, fecha: m.fecha, tipo: m.tipo,
+      monto: m.tipo === 'aporte' ? Number(m.monto) : -Number(m.monto),
+      nota: m.nota || '',
+    }));
+    const timeline = [...movimientosManual, ...eventosAuto].sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+    const tipoInfo = {
+      aporte: { label: 'Aporte', cls: 'atb-rent-ok' },
+      retiro: { label: 'Retiro', cls: 'atb-rent-bad' },
+      compra: { label: 'Compra', cls: 'atb-rent-bad' },
+      venta: { label: 'Venta', cls: 'atb-rent-ok' },
+    };
+    const movRows = timeline.map(m => {
       const fecha = m.fecha ? new Date(m.fecha).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
-      const esAporte = m.tipo === 'aporte';
+      const info = tipoInfo[m.tipo];
+      const positivo = m.monto >= 0;
+      const borrarBtn = m.id
+        ? `<button class="atb-event-del atb-capital-del" data-id="${m.id}">Borrar</button>`
+        : `<span style="color:var(--text-muted); font-size:10px;">ver en "Mis compras"</span>`;
       return `
         <div style="display:flex; align-items:center; gap:10px; padding:8px 0; font-size:12px; border-top:1px solid var(--hairline); flex-wrap:wrap;">
           <span style="color:var(--text-muted); width:80px;">${fecha}</span>
-          <span class="atb-rent-badge ${esAporte ? 'atb-rent-ok' : 'atb-rent-bad'}" style="font-size:10px;">${esAporte ? 'Aporte' : 'Retiro'}</span>
-          <span style="font-weight:600; color:${esAporte ? '#7fc9a3' : '#d97a7a'};">${esAporte ? '+' : '-'}${Math.round(m.monto).toLocaleString('es-CO')}</span>
+          <span class="atb-rent-badge ${info.cls}" style="font-size:10px;">${info.label}</span>
+          <span style="font-weight:600; color:${positivo ? '#7fc9a3' : '#d97a7a'};">${positivo ? '+' : '-'}${Math.round(Math.abs(m.monto)).toLocaleString('es-CO')}</span>
           <span style="color:var(--text-muted); flex:1; min-width:120px;">${m.nota || ''}</span>
-          <button class="atb-event-del atb-capital-del" data-id="${m.id}">Borrar</button>
+          ${borrarBtn}
         </div>`;
     }).join('');
 
@@ -2784,7 +2906,9 @@
         <strong>Cómo leer esto:</strong> esta pestaña no reemplaza "Mis compras" — la resume desde el ángulo del
         capital. "Aportes/retiros" es la plata que tú decides dedicarle a esto (ej. convertir oro a plata).
         "Comprometido" es lo que ya está metido en compras activas sin vender. "Disponible" es lo que te queda
-        libre para comprar algo nuevo ahora mismo, contando la ganancia que ya recuperaste.
+        libre para comprar algo nuevo ahora mismo. El historial de abajo ya incluye tus compras y ventas
+        confirmadas automáticamente — no hace falta que las registres aparte. Solo cuenta lo marcado como
+        "Comprado" al registrarlo; lo "Recolectado" se ve aparte porque no usó este capital.
       </div>
 
       <div class="atb-summary-grid" style="margin-top:16px;">
@@ -2796,12 +2920,12 @@
         <div class="atb-summary-card">
           <h3>Comprometido en compras activas</h3>
           <div class="atb-summary-value">${Math.round(capitalComprometido).toLocaleString('es-CO')}</div>
-          <div class="atb-summary-sub">${comprasActivas.filter(c => !c.vendido).length} compra(s) sin vender por completo</div>
+          <div class="atb-summary-sub">${comprasCapital.filter(c => !c.vendido).length} compra(s) sin vender por completo</div>
         </div>
         <div class="atb-summary-card">
-          <h3>Ganancia realizada</h3>
+          <h3>Ganancia realizada (capital)</h3>
           <div class="atb-summary-value" style="color:${gananciaRealizada >= 0 ? '#7fc9a3' : '#d97a7a'};">${gananciaRealizada >= 0 ? '+' : ''}${Math.round(gananciaRealizada).toLocaleString('es-CO')}</div>
-          <div class="atb-summary-sub">${gananciaPendiente !== 0 ? `+${Math.round(gananciaPendiente).toLocaleString('es-CO')} más si se confirman las ventas listadas` : 'Solo ventas ya confirmadas'}</div>
+          <div class="atb-summary-sub">${gananciaPendiente !== 0 ? `+${Math.round(gananciaPendiente).toLocaleString('es-CO')} más si se confirman las ventas listadas` : 'Solo ventas ya confirmadas'} · no incluye recolección</div>
         </div>
         <div class="atb-summary-card" style="border-color:var(--gold);">
           <h3>Capital disponible</h3>
@@ -2809,6 +2933,17 @@
           <div class="atb-summary-sub">Libre para invertir en algo nuevo ahora mismo</div>
         </div>
       </div>
+
+      ${(itemsRecoleccionVendidos.length || comprasRecoleccion.length) ? `
+      <div class="atb-panel" style="margin-top:16px; border-color:var(--teal);">
+        <label style="font-size:11px; color:var(--teal); text-transform:uppercase; letter-spacing:0.6px; display:block; margin-bottom:6px;">
+          Aparte — ingresos de recolección (no cuentan como retorno de capital)
+        </label>
+        <div style="font-size:13px;">
+          <span style="font-weight:600; color:${gananciaRecoleccion >= 0 ? '#7fc9a3' : '#d97a7a'};">${gananciaRecoleccion >= 0 ? '+' : ''}${Math.round(gananciaRecoleccion).toLocaleString('es-CO')}</span>
+          plata vendiendo ${itemsRecoleccionVendidos.length} item(s) desde sesiones de recolección${comprasRecoleccion.length ? ` y ${comprasRecoleccion.length} desde Mis compras (marcados "Recolectado")` : ''}. Es ingreso real, solo que no midió el rendimiento de tu capital porque no lo compraste con él.
+        </div>
+      </div>` : ''}
 
       <div class="atb-panel" style="margin-top:20px;">
         <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; display:block; margin-bottom:10px;">
@@ -2833,9 +2968,9 @@
 
       <div class="atb-panel" style="margin-top:16px;">
         <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; display:block; margin-bottom:6px;">
-          Historial de movimientos
+          Historial de movimientos (aportes/retiros + compras + ventas confirmadas)
         </label>
-        ${movRows || '<div class="atb-empty">Todavía no has registrado ningún aporte o retiro.</div>'}
+        ${movRows || '<div class="atb-empty">Todavía no hay movimientos registrados.</div>'}
       </div>
     `;
 
@@ -2973,6 +3108,12 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
 
 
 
