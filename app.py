@@ -1278,6 +1278,38 @@ def api_compras_estado(compra_id):
     return jsonify(res.data)
 
 
+@app.route("/api/capital", methods=["GET", "POST"])
+def api_capital():
+    """Ledger de capital dedicado a trading: aportes (ej. plata que sale de
+    convertir oro) y retiros (ej. plata que sacas de vuelta a otra cosa).
+    No mueve nada de compras/ventas — es solo el registro de "cuánta plata
+    le he dedicado a esto en total", para poder calcular cuánta queda libre."""
+    if request.method == "POST":
+        body = request.get_json() or {}
+        tipo = body.get("tipo")
+        monto = body.get("monto")
+        if tipo not in ("aporte", "retiro"):
+            return jsonify({"error": "tipo debe ser 'aporte' o 'retiro'"}), 400
+        if not monto or float(monto) <= 0:
+            return jsonify({"error": "monto debe ser mayor a 0"}), 400
+        nuevo = {
+            "tipo": tipo,
+            "monto": float(monto),
+            "nota": body.get("nota") or None,
+        }
+        res = supabase.table("capital_movimientos").insert(nuevo).execute()
+        return jsonify(res.data), 201
+
+    movimientos = supabase.table("capital_movimientos").select("*").order("fecha", desc=True).execute().data or []
+    return jsonify(movimientos)
+
+
+@app.route("/api/capital/<int:mov_id>", methods=["DELETE"])
+def api_capital_delete(mov_id):
+    supabase.table("capital_movimientos").delete().eq("id", mov_id).execute()
+    return jsonify({"deleted": True})
+
+
 @app.route("/api/inventario", methods=["GET", "POST"])
 def api_inventario():
     if request.method == "POST":
@@ -1514,6 +1546,8 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
 
 
 
