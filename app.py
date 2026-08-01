@@ -1194,6 +1194,12 @@ def api_compras_vender(compra_id):
         "precio_venta": precio_venta,
         "tax_pct": tax_pct,
         "estado": "pendiente",
+        # "ganancia" es NOT NULL en la tabla — se sigue mandando como foto
+        # inicial para cumplir esa restricción, pero NO es la fuente de
+        # verdad: el GET siempre recalcula al vuelo con _ganancia_venta()
+        # usando el precio_venta actual, así que editar el precio después
+        # no requiere tocar esta columna para que el número mostrado sea correcto.
+        "ganancia": _ganancia_venta({"precio_venta": precio_venta, "tax_pct": tax_pct, "cantidad": cantidad}, actual.data["precio_oro"]),
     }
     res = supabase.table("compras_ventas").insert(venta).execute()
     return jsonify(res.data), 201
@@ -1218,6 +1224,10 @@ def api_compras_venta_editar(venta_id):
         cambios["cantidad"] = body["cantidad"]
     if not cambios:
         return jsonify({"error": "nada que actualizar"}), 400
+
+    compra = supabase.table("compras_manual").select("precio_oro").eq("id", venta.data["compra_id"]).single().execute()
+    venta_actualizada = {**venta.data, **cambios}
+    cambios["ganancia"] = _ganancia_venta(venta_actualizada, compra.data["precio_oro"])
 
     res = supabase.table("compras_ventas").update(cambios).eq("id", venta_id).execute()
     return jsonify(res.data)
