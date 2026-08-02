@@ -2836,18 +2836,31 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
 
-    const padL = 56, padR = 12, padT = 12, padB = 24;
-    const w = cssW - padL - padR, h = cssH - padT - padB;
-
     const allVals = series.flatMap(s => s.points.filter(v => v != null));
     if (!allVals.length) {
       ctx.fillStyle = '#9aa0ad';
       ctx.font = '12px Inter, sans-serif';
-      ctx.fillText('Sin datos suficientes todavía para graficar.', padL, padT + h / 2);
+      ctx.fillText('Sin datos suficientes todavía para graficar.', 56, cssH / 2);
       return;
     }
     const minV = Math.min(...allVals), maxV = Math.max(...allVals);
     const range = (maxV - minV) || 1;
+
+    // El margen izquierdo tiene que caber el texto de las etiquetas del eje
+    // (números grandes en monospace) — antes era un valor fijo (56px) y
+    // números de 7+ dígitos se dibujaban parcialmente fuera del canvas por
+    // la izquierda (se veía ".789.921" en vez de "1.789.921"). Se mide el
+    // ancho real del label más largo y se ajusta el margen a eso.
+    ctx.font = '10px IBM Plex Mono, monospace';
+    let maxLabelWidth = 0;
+    for (let i = 0; i <= 4; i++) {
+      const val = maxV - (range * i) / 4;
+      const labelW = ctx.measureText(Math.round(val).toLocaleString('es-CO')).width;
+      if (labelW > maxLabelWidth) maxLabelWidth = labelW;
+    }
+    const padL = Math.max(56, Math.ceil(maxLabelWidth) + 16);
+    const padR = 12, padT = 12, padB = 24;
+    const w = cssW - padL - padR, h = cssH - padT - padB;
 
     ctx.strokeStyle = '#2b3342';
     ctx.lineWidth = 1;
@@ -2919,17 +2932,23 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
 
-    const padL = 56, padR = 12, padT = 10, padB = 22;
-    const w = cssW - padL - padR, h = cssH - padT - padB;
-
     const vals = values.filter(v => v != null);
     if (!vals.length) {
       ctx.fillStyle = '#9aa0ad';
       ctx.font = '12px Inter, sans-serif';
-      ctx.fillText('Sin datos de volumen todavía.', padL, padT + h / 2);
+      ctx.fillText('Sin datos de volumen todavía.', 56, cssH / 2);
       return;
     }
     const maxV = Math.max(...vals, 1);
+
+    // Mismo ajuste que en drawAtbLineChart: margen izquierdo dinámico según
+    // el ancho real de la etiqueta, para que números grandes no se corten.
+    ctx.font = '10px IBM Plex Mono, monospace';
+    const maxLabelWidth = ctx.measureText(Math.round(maxV).toLocaleString('es-CO')).width;
+    const padL = Math.max(56, Math.ceil(maxLabelWidth) + 16);
+    const padR = 12, padT = 10, padB = 22;
+    const w = cssW - padL - padR, h = cssH - padT - padB;
+
     const n = values.length;
     const barW = Math.max(1, (w / n) * 0.7);
 
@@ -2987,12 +3006,24 @@
     const conVenta = venta.filter(v => v != null);
     if (conVenta.length >= 5) {
       const ultimo = conVenta[conVenta.length - 1];
-      const promedio = conVenta.reduce((s, v) => s + v, 0) / conVenta.length;
-      const diff = ((ultimo - promedio) / promedio) * 100;
+      // Mediana en vez de promedio — un solo dato basura (ej. un listado
+      // troll a un precio absurdo) puede inflar el promedio muchísimo y
+      // hacer que este aviso diga cosas engañosas. La mediana no se deja
+      // arrastrar por un solo valor extremo.
+      const ordenado = [...conVenta].sort((a, b) => a - b);
+      const mid = Math.floor(ordenado.length / 2);
+      const mediana = ordenado.length % 2 !== 0 ? ordenado[mid] : (ordenado[mid - 1] + ordenado[mid]) / 2;
+      const diff = ((ultimo - mediana) / mediana) * 100;
       if (diff <= -10) {
-        alertaHtml = `<div class="atb-rent-badge atb-rent-ok" style="margin-bottom:14px;">Precio actual (${Math.round(ultimo).toLocaleString('es-CO')}) está ${Math.abs(diff).toFixed(1)}% por debajo del promedio del período — buen momento para comprar.</div>`;
+        alertaHtml = `<div class="atb-rent-badge atb-rent-ok" style="margin-bottom:14px;">Precio actual (${Math.round(ultimo).toLocaleString('es-CO')}) está ${Math.abs(diff).toFixed(1)}% por debajo de la mediana del período — buen momento para comprar.</div>`;
       } else if (diff >= 10) {
-        alertaHtml = `<div class="atb-rent-badge atb-rent-warn" style="margin-bottom:14px;">Precio actual (${Math.round(ultimo).toLocaleString('es-CO')}) está ${diff.toFixed(1)}% por encima del promedio del período — considera esperar.</div>`;
+        alertaHtml = `<div class="atb-rent-badge atb-rent-warn" style="margin-bottom:14px;">Precio actual (${Math.round(ultimo).toLocaleString('es-CO')}) está ${diff.toFixed(1)}% por encima de la mediana del período — considera esperar.</div>`;
+      }
+      // Si el dato más reciente es un valor absurdamente alto comparado con
+      // la mediana, probablemente sea basura (troll listing) y no un precio
+      // real — se avisa en vez de mostrar la comparación como si fuera confiable.
+      if (ultimo > mediana * 20 && mediana > 0) {
+        alertaHtml = `<div class="atb-rent-badge atb-rent-bad" style="margin-bottom:14px;">⚠ El precio más reciente (${Math.round(ultimo).toLocaleString('es-CO')}) es ${Math.round(ultimo / mediana)}× la mediana del período — probablemente un listado basura/troll, no un precio real. No te fíes de este dato.</div>`;
       }
     }
 
@@ -3426,6 +3457,18 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
