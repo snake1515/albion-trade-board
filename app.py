@@ -1121,6 +1121,23 @@ def api_compras():
             "origen": body.get("origen") if body.get("origen") in ("compra", "recoleccion") else "compra",
         }
         res = supabase.table("compras_manual").insert(nueva).execute()
+        compra_id = res.data[0]["id"]
+
+        # "ya_comprado" = True (default) es el caso simple: compraste instantáneo,
+        # ya tienes las unidades en la mano — se registra de una vez como una
+        # ejecución completa. False = es una ORDEN que se va a ir llenando de a
+        # poco (ej. "puse orden de compra de 100 pociones a 1580") — se crea el
+        # registro sin ninguna ejecución todavía; las vas agregando con
+        # /comprar a medida que el juego confirme fills, y puedes seguir
+        # ajustando "precio_oro" y "cantidad" de la orden mientras tanto sin
+        # perder el precio real al que ya compraste cada parte.
+        if body.get("ya_comprado", True):
+            supabase.table("compras_ejecuciones").insert({
+                "compra_id": compra_id,
+                "cantidad": nueva["cantidad"],
+                "precio_pagado": nueva["precio_oro"],
+            }).execute()
+
         return jsonify(res.data), 201
 
     compras = supabase.table("compras_manual").select("*").order("fecha_creacion", desc=True).execute().data
@@ -1133,17 +1150,41 @@ def api_compras():
     for v in ventas_res.data:
         ventas_por_compra.setdefault(v["compra_id"], []).append(v)
 
-    # Cada compra trae su lista de ventas parciales (puede estar vacía) y los
-    # totales ya calculados, para que el frontend no tenga que hacer la cuenta.
+    ejecuciones_res = supabase.table("compras_ejecuciones").select("*").in_("compra_id", ids).order("fecha", desc=True).execute()
+    ejecuciones_por_compra = {}
+    for e in ejecuciones_res.data:
+        ejecuciones_por_compra.setdefault(e["compra_id"], []).append(e)
+
+    # Cada compra trae su lista de ventas parciales Y su lista de ejecuciones
+    # de compra (puede estar vacía cualquiera de las dos), con los totales ya
+    # calculados para que el frontend no tenga que hacer la cuenta.
     #
+    # Lado COMPRA:
+    # - cantidad_comprada = unidades que YA se pagaron de verdad (suma de
+    #   ejecuciones). Es lo único que realmente tienes en la mano.
+    # - cantidad_pendiente_compra = lo que falta por llenar de la orden.
+    # - precio_promedio_compra = costo real ponderado de lo comprado (puede
+    #   diferir de "precio_oro" si ajustaste el precio a mitad de camino,
+    #   ej. 18 uds a 1580 + el resto a 1583) — es la base real para calcular
+    #   ganancia al vender, no el precio nominal con el que arrancó la orden.
+    #
+    # Lado VENTA (igual que antes):
     # - cantidad_comprometida = unidades con ALGUNA venta registrada, sea
     #   "pendiente" (ya listada, esperando que se venda) o "vendida"
     #   (confirmada). Reserva el stock para que no se pueda vender dos veces.
-    # - cantidad_restante = lo que todavía no tiene NINGÚN intento de venta.
-    # - cantidad_pendiente_venta = lo que está listado pero aún sin confirmar.
-    # - "vendido" (cerrada por completo) solo es true cuando no queda nada sin
-    #   listar Y no queda ninguna venta pendiente de confirmar.
+    # - "vendido" (cerrada por completo) solo es true cuando ya se compró
+    #   todo Y no queda nada sin listar Y no queda ninguna venta sin confirmar.
     for c in compras:
+        ejecuciones = ejecuciones_por_compra.get(c["id"], [])
+        cantidad_comprada = sum(float(e["cantidad"]) for e in ejecuciones)
+        costo_total_comprado = sum(float(e["cantidad"]) * float(e["precio_pagado"]) for e in ejecuciones)
+        precio_promedio_compra = round(costo_total_comprado / cantidad_comprada, 4) if cantidad_comprada > 0 else float(c["precio_oro"])
+        c["ejecuciones"] = ejecuciones
+        c["cantidad_comprada"] = cantidad_comprada
+        c["cantidad_pendiente_compra"] = round(float(c["cantidad"]) - cantidad_comprada, 6)
+        c["costo_total_comprado"] = round(costo_total_comprado, 2)
+        c["precio_promedio_compra"] = precio_promedio_compra
+
         ventas = ventas_por_compra.get(c["id"], [])
         confirmadas = [v for v in ventas if v.get("estado") == "vendida"]
         pendientes_v = [v for v in ventas if v.get("estado") != "vendida"]
@@ -1152,11 +1193,116 @@ def api_compras():
         c["cantidad_vendida"] = sum(float(v["cantidad"]) for v in confirmadas)
         c["cantidad_pendiente_venta"] = sum(float(v["cantidad"]) for v in pendientes_v)
         c["cantidad_restante"] = round(float(c["cantidad"]) - cantidad_comprometida, 6)
-        c["ganancia_acumulada"] = round(sum(_ganancia_venta(v, c["precio_oro"]) for v in confirmadas), 2)
-        c["ganancia_pendiente_estimada"] = round(sum(_ganancia_venta(v, c["precio_oro"]) for v in pendientes_v), 2)
-        c["vendido"] = c["cantidad_restante"] <= 0.0001 and c["cantidad_pendiente_venta"] <= 0.0001
+        # "disponible_para_vender" limita a lo que REALMENTE ya está comprado —
+        # no puedes listar para venta lo que la orden de compra aún no ha llenado.
+        c["cantidad_disponible_venta"] = round(cantidad_comprada - cantidad_comprometida, 6)
+        c["ganancia_acumulada"] = round(sum(_ganancia_venta(v, precio_promedio_compra) for v in confirmadas), 2)
+        c["ganancia_pendiente_estimada"] = round(sum(_ganancia_venta(v, precio_promedio_compra) for v in pendientes_v), 2)
+        c["vendido"] = (
+            c["cantidad_pendiente_compra"] <= 0.0001
+            and c["cantidad_restante"] <= 0.0001
+            and c["cantidad_pendiente_venta"] <= 0.0001
+        )
 
     return jsonify(compras)
+
+
+@app.route("/api/compras/<int:compra_id>", methods=["PATCH"])
+def api_compras_editar(compra_id):
+    """Edita la orden de compra en sí: precio_oro (precio VIGENTE para lo que
+    falta comprar) y/o cantidad (total deseado), además de ciudad/nota. No
+    toca lo que ya se compró — eso queda guardado tal cual en
+    compras_ejecuciones con el precio real que se pagó en su momento."""
+    actual = supabase.table("compras_manual").select("*").eq("id", compra_id).single().execute()
+    if not actual.data:
+        return jsonify({"error": "no encontrada"}), 404
+
+    body = request.get_json(silent=True) or {}
+    cambios = {}
+    if "precio_oro" in body:
+        cambios["precio_oro"] = body["precio_oro"]
+    if "cantidad" in body:
+        ya_comprada = sum(float(e["cantidad"]) for e in
+                           supabase.table("compras_ejecuciones").select("cantidad").eq("compra_id", compra_id).execute().data)
+        if float(body["cantidad"]) < ya_comprada - 0.0001:
+            return jsonify({"error": f"ya se compraron {ya_comprada} unidades, la cantidad total no puede bajar de eso"}), 400
+        cambios["cantidad"] = body["cantidad"]
+    if "city_compra" in body:
+        cambios["city_compra"] = body["city_compra"] or None
+    if "city" in body:
+        cambios["city"] = body["city"]
+    if "nota" in body:
+        cambios["nota"] = body["nota"] or None
+    if not cambios:
+        return jsonify({"error": "nada que actualizar"}), 400
+
+    res = supabase.table("compras_manual").update(cambios).eq("id", compra_id).execute()
+    return jsonify(res.data)
+
+
+@app.route("/api/compras/<int:compra_id>/comprar", methods=["POST"])
+def api_compras_comprar(compra_id):
+    """Registra que se llenó (total o parcialmente) la orden de compra — ej.
+    'de las 100 que pedí, ya me vendieron 18 a 1580'. A diferencia de las
+    ventas, una ejecución de compra ya es un hecho consumado apenas la
+    registras (no tiene estado pendiente/confirmada): en Albion, cuando te
+    llenan una orden de compra, la plata sale y el item llega en el mismo
+    momento."""
+    body = request.get_json(silent=True) or {}
+    precio_pagado = body.get("precio_pagado")
+    if precio_pagado is None:
+        return jsonify({"error": "precio_pagado requerido"}), 400
+
+    compra = supabase.table("compras_manual").select("*").eq("id", compra_id).single().execute()
+    if not compra.data:
+        return jsonify({"error": "no encontrada"}), 404
+
+    cantidad_total = float(compra.data["cantidad"])
+    ejecuciones_existentes = supabase.table("compras_ejecuciones").select("cantidad").eq("compra_id", compra_id).execute().data
+    ya_comprada = sum(float(e["cantidad"]) for e in ejecuciones_existentes)
+    pendiente = round(cantidad_total - ya_comprada, 6)
+
+    cantidad = float(body.get("cantidad") or pendiente)
+    if cantidad <= 0:
+        return jsonify({"error": "esta orden ya se llenó por completo"}), 400
+    if cantidad - pendiente > 0.0001:
+        return jsonify({"error": f"solo faltan {pendiente} unidades por comprar en esta orden, no se pueden registrar {cantidad}"}), 400
+
+    ejecucion = {"compra_id": compra_id, "cantidad": cantidad, "precio_pagado": precio_pagado}
+    res = supabase.table("compras_ejecuciones").insert(ejecucion).execute()
+    return jsonify(res.data), 201
+
+
+@app.route("/api/compras/ejecuciones/<int:ejecucion_id>", methods=["PATCH"])
+def api_compras_ejecucion_editar(ejecucion_id):
+    """Corrige la cantidad y/o el precio pagado de una ejecución ya
+    registrada, por si te equivocaste al anotarla."""
+    ejecucion = supabase.table("compras_ejecuciones").select("*").eq("id", ejecucion_id).single().execute()
+    if not ejecucion.data:
+        return jsonify({"error": "no encontrada"}), 404
+
+    body = request.get_json(silent=True) or {}
+    cambios = {}
+    if "precio_pagado" in body:
+        cambios["precio_pagado"] = body["precio_pagado"]
+    if "cantidad" in body:
+        compra = supabase.table("compras_manual").select("cantidad").eq("id", ejecucion.data["compra_id"]).single().execute()
+        otras = supabase.table("compras_ejecuciones").select("cantidad").eq("compra_id", ejecucion.data["compra_id"]).neq("id", ejecucion_id).execute().data
+        ya_otras = sum(float(e["cantidad"]) for e in otras)
+        if ya_otras + float(body["cantidad"]) - float(compra.data["cantidad"]) > 0.0001:
+            return jsonify({"error": "esa cantidad excede el total de la orden de compra"}), 400
+        cambios["cantidad"] = body["cantidad"]
+    if not cambios:
+        return jsonify({"error": "nada que actualizar"}), 400
+
+    res = supabase.table("compras_ejecuciones").update(cambios).eq("id", ejecucion_id).execute()
+    return jsonify(res.data)
+
+
+@app.route("/api/compras/ejecuciones/<int:ejecucion_id>", methods=["DELETE"])
+def api_compras_ejecucion_delete(ejecucion_id):
+    supabase.table("compras_ejecuciones").delete().eq("id", ejecucion_id).execute()
+    return jsonify({"deleted": True})
 
 
 @app.route("/api/compras/<int:compra_id>/vender", methods=["POST"])
@@ -1175,18 +1321,23 @@ def api_compras_vender(compra_id):
     if not actual.data:
         return jsonify({"error": "no encontrada"}), 404
 
-    cantidad_total = float(actual.data["cantidad"])
+    # El tope real para vender es lo que YA se compró de verdad (ejecuciones),
+    # no el tamaño nominal de la orden — no puedes vender lo que aún no llenan.
+    ejecuciones = supabase.table("compras_ejecuciones").select("cantidad, precio_pagado").eq("compra_id", compra_id).execute().data
+    cantidad_comprada = sum(float(e["cantidad"]) for e in ejecuciones)
+    costo_total = sum(float(e["cantidad"]) * float(e["precio_pagado"]) for e in ejecuciones)
+    precio_promedio_compra = (costo_total / cantidad_comprada) if cantidad_comprada > 0 else float(actual.data["precio_oro"])
 
     ventas_existentes = supabase.table("compras_ventas").select("cantidad").eq("compra_id", compra_id).execute().data
     ya_comprometida = sum(float(v["cantidad"]) for v in ventas_existentes)  # pendientes + vendidas, todas reservan stock
-    restante = round(cantidad_total - ya_comprometida, 6)
+    restante = round(cantidad_comprada - ya_comprometida, 6)
 
-    # Si no mandan cantidad, se asume que están listando todo lo que queda sin listar.
+    # Si no mandan cantidad, se asume que están listando todo lo que queda disponible.
     cantidad = float(body.get("cantidad") or restante)
     if cantidad <= 0:
-        return jsonify({"error": "no queda cantidad sin listar en esta compra"}), 400
+        return jsonify({"error": "no queda cantidad disponible para vender (revisa si ya se compró — no puedes vender lo que la orden aún no ha llenado)"}), 400
     if cantidad - restante > 0.0001:
-        return jsonify({"error": f"solo quedan {restante} unidades sin listar, no se pueden vender {cantidad}"}), 400
+        return jsonify({"error": f"solo quedan {restante} unidades disponibles para vender, no se pueden vender {cantidad}"}), 400
 
     venta = {
         "compra_id": compra_id,
@@ -1197,9 +1348,10 @@ def api_compras_vender(compra_id):
         # "ganancia" es NOT NULL en la tabla — se sigue mandando como foto
         # inicial para cumplir esa restricción, pero NO es la fuente de
         # verdad: el GET siempre recalcula al vuelo con _ganancia_venta()
-        # usando el precio_venta actual, así que editar el precio después
-        # no requiere tocar esta columna para que el número mostrado sea correcto.
-        "ganancia": _ganancia_venta({"precio_venta": precio_venta, "tax_pct": tax_pct, "cantidad": cantidad}, actual.data["precio_oro"]),
+        # usando el precio_venta actual Y el precio_promedio_compra actual,
+        # así que editar cualquiera de los dos después no requiere tocar esta
+        # columna para que el número mostrado sea correcto.
+        "ganancia": _ganancia_venta({"precio_venta": precio_venta, "tax_pct": tax_pct, "cantidad": cantidad}, precio_promedio_compra),
     }
     res = supabase.table("compras_ventas").insert(venta).execute()
     return jsonify(res.data), 201
@@ -1271,6 +1423,7 @@ def api_compras_venta_delete(venta_id):
 @app.route("/api/compras/<int:compra_id>", methods=["DELETE"])
 def api_compras_delete(compra_id):
     supabase.table("compras_ventas").delete().eq("compra_id", compra_id).execute()
+    supabase.table("compras_ejecuciones").delete().eq("compra_id", compra_id).execute()
     supabase.table("compras_manual").delete().eq("id", compra_id).execute()
     return jsonify({"deleted": True})
 
