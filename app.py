@@ -1098,8 +1098,14 @@ def _ganancia_venta(venta, precio_oro):
     """Ganancia de una venta parcial, calculada siempre al vuelo a partir del
     precio_venta guardado — así, si editas el precio de una venta pendiente,
     la ganancia se recalcula sola en el próximo GET, sin tener que tocar
-    ninguna columna aparte."""
-    precio_venta_neto = float(venta["precio_venta"]) * (1 - float(venta.get("tax_pct") or 0) / 100)
+    ninguna columna aparte.
+
+    Descuenta DOS cosas del precio de venta, igual que el juego (ver "Editar
+    orden de venta"): el impuesto de mercado (tax_pct, solo se cobra si se
+    vende de verdad) y la tarifa de publicación (tarifa_pct, se cobra por
+    poner/actualizar la orden, se venda o no)."""
+    descuento_pct = (float(venta.get("tax_pct") or 0) + float(venta.get("tarifa_pct") or 0)) / 100
+    precio_venta_neto = float(venta["precio_venta"]) * (1 - descuento_pct)
     return round((precio_venta_neto - float(precio_oro)) * float(venta["cantidad"]), 2)
 
 
@@ -1136,6 +1142,7 @@ def api_compras():
                 "compra_id": compra_id,
                 "cantidad": nueva["cantidad"],
                 "precio_pagado": nueva["precio_oro"],
+                "tarifa_pct": body.get("tarifa_pct", 0),
             }).execute()
 
         return jsonify(res.data), 201
@@ -1177,7 +1184,14 @@ def api_compras():
     for c in compras:
         ejecuciones = ejecuciones_por_compra.get(c["id"], [])
         cantidad_comprada = sum(float(e["cantidad"]) for e in ejecuciones)
-        costo_total_comprado = sum(float(e["cantidad"]) * float(e["precio_pagado"]) for e in ejecuciones)
+        # El costo real de cada ejecución incluye la tarifa de publicación
+        # (se cobra por poner/actualizar la orden de compra, igual que
+        # muestra el juego en "Editar orden de compra") — no es un costo
+        # aparte, es plata que de verdad salió de tu bolsillo por esas unidades.
+        costo_total_comprado = sum(
+            float(e["cantidad"]) * float(e["precio_pagado"]) * (1 + float(e.get("tarifa_pct") or 0) / 100)
+            for e in ejecuciones
+        )
         precio_promedio_compra = round(costo_total_comprado / cantidad_comprada, 4) if cantidad_comprada > 0 else float(c["precio_oro"])
         c["ejecuciones"] = ejecuciones
         c["cantidad_comprada"] = cantidad_comprada
@@ -1268,7 +1282,12 @@ def api_compras_comprar(compra_id):
     if cantidad - pendiente > 0.0001:
         return jsonify({"error": f"solo faltan {pendiente} unidades por comprar en esta orden, no se pueden registrar {cantidad}"}), 400
 
-    ejecucion = {"compra_id": compra_id, "cantidad": cantidad, "precio_pagado": precio_pagado}
+    ejecucion = {
+        "compra_id": compra_id,
+        "cantidad": cantidad,
+        "precio_pagado": precio_pagado,
+        "tarifa_pct": body.get("tarifa_pct", 0),  # % de tarifa de publicación, viene del input "atb-setupfee" del frontend
+    }
     res = supabase.table("compras_ejecuciones").insert(ejecucion).execute()
     return jsonify(res.data), 201
 
@@ -1285,6 +1304,8 @@ def api_compras_ejecucion_editar(ejecucion_id):
     cambios = {}
     if "precio_pagado" in body:
         cambios["precio_pagado"] = body["precio_pagado"]
+    if "tarifa_pct" in body:
+        cambios["tarifa_pct"] = body["tarifa_pct"]
     if "cantidad" in body:
         compra = supabase.table("compras_manual").select("cantidad").eq("id", ejecucion.data["compra_id"]).single().execute()
         otras = supabase.table("compras_ejecuciones").select("cantidad").eq("compra_id", ejecucion.data["compra_id"]).neq("id", ejecucion_id).execute().data
@@ -1314,6 +1335,7 @@ def api_compras_vender(compra_id):
     body = request.get_json(silent=True) or {}
     precio_venta = body.get("precio_venta")
     tax_pct = body.get("tax_pct", 0)  # % de impuesto de mercado, viene del input "atb-tax" del frontend
+    tarifa_pct = body.get("tarifa_pct", 0)  # % de tarifa de publicación, viene del input "atb-setupfee" del frontend
     if precio_venta is None:
         return jsonify({"error": "precio_venta requerido"}), 400
 
@@ -1344,6 +1366,7 @@ def api_compras_vender(compra_id):
         "cantidad": cantidad,
         "precio_venta": precio_venta,
         "tax_pct": tax_pct,
+        "tarifa_pct": tarifa_pct,
         "estado": "pendiente",
         # "ganancia" es NOT NULL en la tabla — se sigue mandando como foto
         # inicial para cumplir esa restricción, pero NO es la fuente de
@@ -1351,7 +1374,7 @@ def api_compras_vender(compra_id):
         # usando el precio_venta actual Y el precio_promedio_compra actual,
         # así que editar cualquiera de los dos después no requiere tocar esta
         # columna para que el número mostrado sea correcto.
-        "ganancia": _ganancia_venta({"precio_venta": precio_venta, "tax_pct": tax_pct, "cantidad": cantidad}, precio_promedio_compra),
+        "ganancia": _ganancia_venta({"precio_venta": precio_venta, "tax_pct": tax_pct, "tarifa_pct": tarifa_pct, "cantidad": cantidad}, precio_promedio_compra),
     }
     res = supabase.table("compras_ventas").insert(venta).execute()
     return jsonify(res.data), 201
@@ -1374,12 +1397,27 @@ def api_compras_venta_editar(venta_id):
         cambios["precio_venta"] = body["precio_venta"]
     if "cantidad" in body:
         cambios["cantidad"] = body["cantidad"]
+    if "tax_pct" in body:
+        cambios["tax_pct"] = body["tax_pct"]
+    if "tarifa_pct" in body:
+        cambios["tarifa_pct"] = body["tarifa_pct"]
     if not cambios:
         return jsonify({"error": "nada que actualizar"}), 400
 
-    compra = supabase.table("compras_manual").select("precio_oro").eq("id", venta.data["compra_id"]).single().execute()
+    # Costo real ponderado de lo comprado (no el precio nominal de la orden),
+    # igual que en /vender — así el snapshot de ganancia queda consistente
+    # con lo que muestra el GET.
+    ejecuciones = supabase.table("compras_ejecuciones").select("cantidad, precio_pagado, tarifa_pct").eq("compra_id", venta.data["compra_id"]).execute().data
+    cantidad_comprada = sum(float(e["cantidad"]) for e in ejecuciones)
+    if cantidad_comprada > 0:
+        costo_total = sum(float(e["cantidad"]) * float(e["precio_pagado"]) * (1 + float(e.get("tarifa_pct") or 0) / 100) for e in ejecuciones)
+        precio_oro = costo_total / cantidad_comprada
+    else:
+        compra = supabase.table("compras_manual").select("precio_oro").eq("id", venta.data["compra_id"]).single().execute()
+        precio_oro = float(compra.data["precio_oro"])
+
     venta_actualizada = {**venta.data, **cambios}
-    cambios["ganancia"] = _ganancia_venta(venta_actualizada, compra.data["precio_oro"])
+    cambios["ganancia"] = _ganancia_venta(venta_actualizada, precio_oro)
 
     res = supabase.table("compras_ventas").update(cambios).eq("id", venta_id).execute()
     return jsonify(res.data)
@@ -1742,6 +1780,17 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
+
+
+
+
 
 
 
