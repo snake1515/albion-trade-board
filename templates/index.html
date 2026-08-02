@@ -119,6 +119,28 @@
   .atb-scroll, #atb-content { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   #atb-content table.atb-table { min-width: 640px; }
 
+  /* Tarjetas de "Mis compras" — una por orden, con borde de color distinto
+     por tarjeta para que sea fácil distinguir una orden de otra a simple
+     vista cuando hay varias abiertas al tiempo. */
+  .atb-compra-cards { display: flex; flex-direction: column; gap: 14px; }
+  .atb-compra-card { background: var(--panel-raised); border: 1px solid var(--hairline); border-left-width: 4px; border-radius: 6px; padding: 14px 16px; }
+  .atb-compra-card-header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--hairline); }
+  .atb-compra-id { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-muted); background: rgba(255,255,255,0.04); border: 1px solid var(--hairline); border-radius: 10px; padding: 2px 9px; }
+  .atb-compra-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 6px; }
+  .atb-compra-card-grid label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 4px; }
+  .atb-compra-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--hairline); }
+
+  /* Bloque de ejecuciones de COMPRA (dinero que sale) — tinte azulado */
+  .atb-ejecuciones-block { margin-top: 10px; padding: 10px 12px; background: rgba(76, 145, 212, 0.07); border: 1px solid rgba(76, 145, 212, 0.25); border-radius: 5px; }
+  .atb-ejecuciones-block .atb-block-title { color: #7fb3e0; }
+  /* Bloque de VENTAS (dinero que entra) — tinte dorado/verdoso, a propósito
+     distinto del azul de compras para que no se confundan de un vistazo */
+  .atb-ventas-block { margin-top: 10px; padding: 10px 12px; background: rgba(224, 165, 58, 0.07); border: 1px solid rgba(224, 165, 58, 0.25); border-radius: 5px; }
+  .atb-ventas-block .atb-block-title { color: var(--gold-bright); }
+  .atb-block-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; font-weight: 600; }
+  .atb-block-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 11px; border-top: 1px solid rgba(255,255,255,0.06); flex-wrap: wrap; }
+  .atb-block-row:first-of-type { border-top: none; }
+
   .atb-event-form { display: grid; grid-template-columns: 140px 1fr 130px 130px auto; gap: 10px; align-items: end; margin-bottom: 18px; }
   .atb-event-form textarea { grid-column: 1 / -1; background: var(--panel-raised); border: 1px solid var(--hairline); color: var(--text); padding: 8px 10px; border-radius: 4px; font-family: 'Inter', sans-serif; font-size: 12.5px; resize: vertical; min-height: 40px; }
   .atb-timeline { display: flex; flex-direction: column; gap: 10px; }
@@ -998,7 +1020,7 @@
              <button class="atb-btn atb-venta-marcar-vendida" data-id="${v.id}" style="padding:3px 8px; font-size:10px; background:var(--teal); color:#0d1712;">Marcar vendida</button>`
           : `<button class="atb-event-del atb-venta-marcar-pendiente" data-id="${v.id}" style="font-size:10px;">Revertir a pendiente</button>`;
         return `
-          <div style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:11px; border-top:1px solid var(--hairline); flex-wrap:wrap;">
+          <div class="atb-block-row">
             <span style="color:var(--text-muted); width:55px;">${fecha}</span>
             ${badge}
             ${cantCell}
@@ -1010,7 +1032,7 @@
             <button class="atb-event-del atb-venta-del" data-id="${v.id}" style="margin-left:auto; font-size:10px;">Borrar venta</button>
           </div>`;
       }).join('');
-      return `<div style="margin-top:6px; padding-left:4px;"><div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Ventas parciales</div>${filas}</div>`;
+      return `<div class="atb-ventas-block"><div class="atb-block-title">💰 Ventas parciales (dinero que entra)</div>${filas}</div>`;
     }
 
     function ejecucionesSubfila(c) {
@@ -1019,7 +1041,7 @@
         const total = Number(e.cantidad) * Number(e.precio_pagado);
         const fecha = e.fecha ? new Date(e.fecha).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) : '';
         return `
-          <div style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:11px; border-top:1px solid var(--hairline); flex-wrap:wrap;">
+          <div class="atb-block-row">
             <span style="color:var(--text-muted); width:55px;">${fecha}</span>
             <span class="atb-rent-badge atb-rent-ok" style="font-size:10px;">Comprado</span>
             <input type="number" class="atb-ejecucion-cant-edit" data-id="${e.id}" value="${e.cantidad}" min="0.0001" step="any" style="width:60px;">
@@ -1030,8 +1052,14 @@
             <button class="atb-event-del atb-ejecucion-del" data-id="${e.id}" style="margin-left:auto; font-size:10px;">Borrar</button>
           </div>`;
       }).join('');
-      return `<div style="margin-top:6px; padding-left:4px;"><div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Ejecuciones de la orden de compra (${c.cantidad_comprada} de ${c.cantidad} ya compradas)</div>${filas}</div>`;
+      return `<div class="atb-ejecuciones-block"><div class="atb-block-title">🛒 Ejecuciones de la orden de compra — ${c.cantidad_comprada} de ${c.cantidad} ya compradas (dinero que sale)</div>${filas}</div>`;
     }
+
+    // Paleta de colores para el borde de cada tarjeta — se asigna por id de
+    // la compra (no por posición en la lista) para que una orden siempre se
+    // vea del mismo color aunque la lista se reordene o se filtre.
+    const CARD_COLORS = ['#d4a24c', '#4c9fd4', '#7fc9a3', '#c97fc9', '#e0855a', '#8aa9d4', '#c9c14c', '#6bc9a8'];
+    function colorParaCompra(c) { return CARD_COLORS[c.id % CARD_COLORS.length]; }
 
     function rowCompra(c) {
       const pendienteCompra = Number(c.cantidad_pendiente_compra ?? 0);
@@ -1069,28 +1097,30 @@
       const ventaForm = sinCupoParaVender
         ? `<span style="color:var(--text-muted); font-size:11px;">${esOrdenAbierta && !cancelada ? 'Aún no hay stock comprado para vender.' : '—'}</span>`
         : `
-          <div style="display:flex; flex-direction:column; gap:4px;">
+          <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:end;">
             <input type="number" class="atb-compra-cant-venta" data-id="${c.id}" min="0.0001" max="${restanteSinListar}" step="any" value="${restanteSinListar}" placeholder="cant." style="width:70px;" title="Cantidad a listar para venta (por defecto: todo lo comprado que falta por listar)">
             <input type="number" class="atb-compra-precio-venta" data-id="${c.id}" min="0" placeholder="precio c/u" style="width:90px;">
+            <button class="atb-btn atb-compra-vender-btn" style="padding:6px 10px; font-size:11px;" data-id="${c.id}">Registrar venta</button>
           </div>`;
       // Editar precio/cantidad de la orden — deshabilitado si ya está cerrada o cancelada
       const ordenEditable = !c.vendido && !cancelada;
-      const precioCell = ordenEditable
-        ? `<input type="number" class="atb-orden-precio-edit" data-id="${c.id}" value="${c.precio_oro}" min="0" style="width:80px;" title="Precio vigente de la orden para lo que falta comprar">`
-        : `${Math.round(c.precio_oro).toLocaleString('es-CO')}`;
-      const cantidadOrdenCell = ordenEditable
-        ? `<input type="number" class="atb-orden-cantidad-edit" data-id="${c.id}" value="${c.cantidad}" min="${c.cantidad_comprada}" step="any" style="width:70px; margin-top:4px;" title="Cantidad total deseada en la orden">`
-        : '';
-      const guardarOrdenBtn = ordenEditable
-        ? `<button class="atb-btn atb-orden-guardar" data-id="${c.id}" style="padding:3px 8px; font-size:10px; margin-top:4px;">Actualizar orden</button>`
-        : '';
+      const precioCantOrdenCell = ordenEditable
+        ? `
+          <div style="display:flex; gap:6px; align-items:end; flex-wrap:wrap;">
+            <div><label style="display:block; font-size:9px; color:var(--text-muted);">Precio</label><input type="number" class="atb-orden-precio-edit" data-id="${c.id}" value="${c.precio_oro}" min="0" style="width:80px;" title="Precio vigente de la orden para lo que falta comprar"></div>
+            <div><label style="display:block; font-size:9px; color:var(--text-muted);">Cant. total</label><input type="number" class="atb-orden-cantidad-edit" data-id="${c.id}" value="${c.cantidad}" min="${c.cantidad_comprada}" step="any" style="width:70px;" title="Cantidad total deseada en la orden"></div>
+            <button class="atb-btn atb-orden-guardar" data-id="${c.id}" style="padding:6px 10px; font-size:11px;">Actualizar orden</button>
+          </div>`
+        : `${Math.round(c.precio_oro).toLocaleString('es-CO')} c/u`;
       const comprarForm = (esOrdenAbierta && !cancelada)
         ? `
-          <div style="display:flex; flex-direction:column; gap:4px; margin-top:6px; padding-top:6px; border-top:1px dashed var(--hairline);">
-            <span style="font-size:10px; color:var(--text-muted);">Registrar compra ejecutada:</span>
-            <input type="number" class="atb-orden-cant-comprar" data-id="${c.id}" min="0.0001" max="${pendienteCompra}" step="any" value="${pendienteCompra}" placeholder="cant." style="width:70px;" title="Cantidad que se llenó (por defecto: todo lo que falta)">
-            <input type="number" class="atb-orden-precio-comprar" data-id="${c.id}" min="0" value="${c.precio_oro}" placeholder="precio pagado c/u" style="width:90px;">
-            <button class="atb-btn atb-orden-comprar-btn" data-id="${c.id}" style="padding:3px 8px; font-size:10px; background:var(--teal); color:#0d1712;">Registrar compra</button>
+          <div style="margin-top:8px;">
+            <label style="display:block; font-size:9px; color:var(--text-muted); margin-bottom:4px;">Registrar compra ejecutada</label>
+            <div style="display:flex; gap:6px; align-items:end; flex-wrap:wrap;">
+              <input type="number" class="atb-orden-cant-comprar" data-id="${c.id}" min="0.0001" max="${pendienteCompra}" step="any" value="${pendienteCompra}" placeholder="cant." style="width:70px;" title="Cantidad que se llenó (por defecto: todo lo que falta)">
+              <input type="number" class="atb-orden-precio-comprar" data-id="${c.id}" min="0" value="${c.precio_oro}" placeholder="precio pagado c/u" style="width:90px;">
+              <button class="atb-btn atb-orden-comprar-btn" data-id="${c.id}" style="padding:6px 10px; font-size:11px; background:var(--teal); color:#0d1712;">Registrar compra</button>
+            </div>
           </div>`
         : '';
       const gananciaAcum = Number(c.ganancia_acumulada || 0);
@@ -1099,25 +1129,53 @@
         ? `<div style="font-size:10px; margin-top:4px; color:${gananciaAcum >= 0 ? '#7fc9a3' : '#d97a7a'};">${gananciaAcum >= 0 ? '+' : ''}${Math.round(gananciaAcum).toLocaleString('es-CO')} confirmada${pendienteVenta > 0 ? `<br><span style="color:var(--text-muted);">${gananciaPend >= 0 ? '+' : ''}${Math.round(gananciaPend).toLocaleString('es-CO')} estimada (pendiente)</span>` : ''}</div>`
         : '';
       const esRecoleccion = c.origen === 'recoleccion';
-      const nombreCell = `${itemIcon(c.item_id)}${c.item_name}${esRecoleccion ? '<div><span class="atb-rent-badge" style="font-size:10px; margin-top:4px; color:var(--teal); border-color:var(--teal); background:rgba(0,0,0,0);">Recolectado — no usa capital</span></div>' : ''}${cancelada ? '<div><span class="atb-rent-badge atb-rent-bad" style="font-size:10px; margin-top:4px;">Cancelada</span></div>' : ''}`;
+      const badges = `${esRecoleccion ? `<span class="atb-rent-badge" style="font-size:10px; color:var(--teal); border-color:var(--teal); background:rgba(0,0,0,0);">Recolectado — no usa capital</span>` : ''}${cancelada ? `<span class="atb-rent-badge atb-rent-bad" style="font-size:10px;">Cancelada</span>` : ''}${c.vendido ? `<span class="atb-rent-badge atb-rent-ok" style="font-size:10px;">Ejecución total</span>` : ''}`;
       const subfilas = [ejecucionesSubfila(c), ventasSubfila(c)].filter(Boolean).join('');
+      const color = colorParaCompra(c);
+
       return `
-        <tr>
-          <td class="atb-item-name">${nombreCell}</td>
-          <td class="atb-route">${ruta}</td>
-          <td>${precioCell}${cantidadOrdenCell}${guardarOrdenBtn}</td>
-          <td>${cantidadCell}</td>
-          <td style="color:#d97a7a; font-weight:600;">-${Math.round(costoRealTotal).toLocaleString('es-CO')}${esOrdenAbierta ? `<div style="font-size:10px; color:var(--text-muted); font-weight:400;">(${Math.round(Number(c.costo_total_comprado || 0)).toLocaleString('es-CO')} ya pagado)</div>` : ''}${gananciaTag}</td>
-          <td style="font-size:11px; color:var(--text-muted);">${c.nota || ''}</td>
-          <td>${estadoCell}</td>
-          <td>${ventaForm}${comprarForm}</td>
-          <td>
-            ${sinCupoParaVender ? '' : `<button class="atb-btn atb-compra-vender-btn" style="padding:5px 10px; font-size:11px;" data-id="${c.id}">Registrar venta</button>`}
-            <button class="atb-btn atb-compra-estado-btn" data-id="${c.id}" data-nuevo-estado="${cancelada ? 'en_ejecucion' : 'cancelado'}" style="padding:5px 10px; font-size:11px; background:${cancelada ? 'var(--teal)' : 'var(--panel-raised)'}; color:${cancelada ? '#0d1712' : 'var(--text-muted)'}; border:1px solid var(--hairline);">${cancelada ? 'Reactivar' : 'Cancelar compra'}</button>
-            <button class="atb-event-del atb-compra-del" data-id="${c.id}">Borrar compra</button>
-          </td>
-        </tr>
-        ${subfilas ? `<tr><td colspan="9" style="padding-top:0;">${subfilas}</td></tr>` : ''}`;
+        <div class="atb-compra-card" style="border-left-color:${color};">
+          <div class="atb-compra-card-header">
+            <span class="atb-compra-id" style="border-color:${color}; color:${color};">Orden #${c.id}</span>
+            <span class="atb-item-name">${itemIcon(c.item_id)}${c.item_name}</span>
+            <span class="atb-route">${ruta}</span>
+            ${badges}
+            <span style="margin-left:auto; display:flex; gap:8px;">
+              ${!c.vendido ? `<button class="atb-btn atb-compra-estado-btn" data-id="${c.id}" data-nuevo-estado="${cancelada ? 'en_ejecucion' : 'cancelado'}" style="padding:5px 10px; font-size:11px; background:${cancelada ? 'var(--teal)' : 'var(--panel-raised)'}; color:${cancelada ? '#0d1712' : 'var(--text-muted)'}; border:1px solid var(--hairline);">${cancelada ? 'Reactivar' : 'Cancelar compra'}</button>` : ''}
+              <button class="atb-event-del atb-compra-del" data-id="${c.id}">Borrar compra</button>
+            </span>
+          </div>
+
+          <div class="atb-compra-card-grid">
+            <div>
+              <label>Precio orden / cantidad</label>
+              ${precioCantOrdenCell}
+            </div>
+            <div>
+              <label>Cantidad sin listar</label>
+              ${cantidadCell}
+            </div>
+            <div>
+              <label>Total invertido</label>
+              <span style="color:#d97a7a; font-weight:600;">-${Math.round(costoRealTotal).toLocaleString('es-CO')}</span>
+              ${esOrdenAbierta ? `<div style="font-size:10px; color:var(--text-muted);">(${Math.round(Number(c.costo_total_comprado || 0)).toLocaleString('es-CO')} ya pagado)</div>` : ''}
+              ${gananciaTag}
+            </div>
+            <div>
+              <label>Rentabilidad ahora</label>
+              ${estadoCell}
+            </div>
+            ${c.nota ? `<div><label>Nota</label><span style="font-size:11px; color:var(--text-muted);">${c.nota}</span></div>` : ''}
+          </div>
+
+          ${!sinCupoParaVender || comprarForm ? `
+            <div class="atb-compra-card-actions" style="border-top:none; padding-top:0; flex-direction:column; align-items:stretch;">
+              ${!sinCupoParaVender ? `<div><label style="display:block; font-size:9px; color:var(--text-muted); margin-bottom:4px;">Registrar venta parcial</label>${ventaForm}</div>` : ''}
+              ${comprarForm}
+            </div>` : ''}
+
+          ${subfilas}
+        </div>`;
     }
 
     const resumenCiudades = Object.entries(porCiudad)
@@ -1177,8 +1235,7 @@
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
         Pendientes (${pendientes.length}) · <span style="color:#d97a7a; font-weight:600;">-${Math.round(totalInvertido).toLocaleString('es-CO')}</span> plata invertida sin vender${cantVentasPendientes ? ` · ${cantVentasPendientes} venta(s) esperando confirmación` : ''}
       </p>
-      <table class="atb-table"><thead><tr><th>Item</th><th>Ruta (compra → actual)</th><th>Precio orden (c/u)</th><th>Cant. (sin listar)</th><th>Total invertido</th><th>Nota</th><th>Estado</th><th>Registrar venta parcial</th><th></th></tr></thead>
-      <tbody>${pendientes.map(c => rowCompra(c)).join('') || '<tr><td colspan="9" class="atb-empty">Sin compras pendientes.</td></tr>'}</tbody></table>
+      <div class="atb-compra-cards">${pendientes.map(c => rowCompra(c)).join('') || '<div class="atb-empty">Sin compras pendientes.</div>'}</div>
 
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:22px 0 8px;">Ganancias y pérdidas (solo ventas CONFIRMADAS) — ya con el % de impuesto de mercado descontado</p>
       <div class="atb-summary-grid">
@@ -1195,8 +1252,7 @@
       </div>
 
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:18px 0 8px;">Ejecución total (${vendidas.length})</p>
-      <table class="atb-table"><thead><tr><th>Item</th><th>Ruta (compra → actual)</th><th>Precio compra c/u</th><th>Cant.</th><th>Total invertido</th><th>Nota</th><th>Estado</th><th></th><th></th></tr></thead>
-      <tbody>${vendidas.map(c => rowCompra(c)).join('') || '<tr><td colspan="9" class="atb-empty">Todavía ninguna vendida por completo.</td></tr>'}</tbody></table>
+      <div class="atb-compra-cards">${vendidas.map(c => rowCompra(c)).join('') || '<div class="atb-empty">Todavía ninguna vendida por completo.</div>'}</div>
     `;
 
     const chkRevender = document.getElementById('atb-compra-destino-revender');
