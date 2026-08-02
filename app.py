@@ -1286,6 +1286,7 @@ def api_compras_comprar(compra_id):
         "compra_id": compra_id,
         "cantidad": cantidad,
         "precio_pagado": precio_pagado,
+        "nota": body.get("nota") or None,
         "tarifa_pct": body.get("tarifa_pct", 0),  # % de tarifa de publicación, viene del input "atb-setupfee" del frontend
     }
     res = supabase.table("compras_ejecuciones").insert(ejecucion).execute()
@@ -1306,6 +1307,8 @@ def api_compras_ejecucion_editar(ejecucion_id):
         cambios["precio_pagado"] = body["precio_pagado"]
     if "tarifa_pct" in body:
         cambios["tarifa_pct"] = body["tarifa_pct"]
+    if "nota" in body:
+        cambios["nota"] = body["nota"] or None
     if "cantidad" in body:
         compra = supabase.table("compras_manual").select("cantidad").eq("id", ejecucion.data["compra_id"]).single().execute()
         otras = supabase.table("compras_ejecuciones").select("cantidad").eq("compra_id", ejecucion.data["compra_id"]).neq("id", ejecucion_id).execute().data
@@ -1367,6 +1370,7 @@ def api_compras_vender(compra_id):
         "precio_venta": precio_venta,
         "tax_pct": tax_pct,
         "tarifa_pct": tarifa_pct,
+        "nota": body.get("nota") or None,
         "estado": "pendiente",
         # "ganancia" es NOT NULL en la tabla — se sigue mandando como foto
         # inicial para cumplir esa restricción, pero NO es la fuente de
@@ -1384,14 +1388,17 @@ def api_compras_vender(compra_id):
 def api_compras_venta_editar(venta_id):
     """Edita el precio (y opcionalmente la cantidad) de una venta parcial
     mientras siga 'pendiente' — para cuando hay que ir bajando el precio de
-    la misma orden de venta. Una vez confirmada 'vendida', el precio queda fijo."""
+    la misma orden de venta. Una vez confirmada 'vendida', el precio queda
+    fijo, pero la nota se puede seguir editando siempre."""
     venta = supabase.table("compras_ventas").select("*").eq("id", venta_id).single().execute()
     if not venta.data:
         return jsonify({"error": "no encontrada"}), 404
-    if venta.data.get("estado") == "vendida":
-        return jsonify({"error": "esta venta ya está confirmada como vendida — no se puede editar el precio"}), 400
 
     body = request.get_json(silent=True) or {}
+    campos_financieros = {"precio_venta", "cantidad", "tax_pct", "tarifa_pct"}
+    if venta.data.get("estado") == "vendida" and campos_financieros & body.keys():
+        return jsonify({"error": "esta venta ya está confirmada como vendida — no se puede editar el precio/cantidad, solo la nota"}), 400
+
     cambios = {}
     if "precio_venta" in body:
         cambios["precio_venta"] = body["precio_venta"]
@@ -1401,6 +1408,8 @@ def api_compras_venta_editar(venta_id):
         cambios["tax_pct"] = body["tax_pct"]
     if "tarifa_pct" in body:
         cambios["tarifa_pct"] = body["tarifa_pct"]
+    if "nota" in body:
+        cambios["nota"] = body["nota"] or None
     if not cambios:
         return jsonify({"error": "nada que actualizar"}), 400
 
@@ -1780,25 +1789,3 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
