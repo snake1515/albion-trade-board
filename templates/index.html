@@ -700,12 +700,13 @@
       return { sinDatos: true, label: 'Sin datos de precio', detalle: 'Trae los últimos precios para poder evaluarla.' };
     }
     const tax = Number(document.getElementById('atb-tax').value) / 100;
+    const setupFee = Number(document.getElementById('atb-setupfee').value) / 100;
     const minMargin = Number(document.getElementById('atb-minmargin').value) || 0;
     const precioPagado = Number(c.precio_promedio_compra ?? c.precio_oro);
 
     function escenario(precioRef, fechaRef, nombre) {
       if (!precioRef || precioRef <= 0) return { label: `${nombre}: sin dato`, cls: 'atb-rent-unknown' };
-      const neto = precioRef * (1 - tax);
+      const neto = precioRef * (1 - tax - setupFee);
       const margen = neto - precioPagado;
       const margenPct = precioPagado > 0 ? (margen / precioPagado) * 100 : 0;
       const ageHours = fechaRef ? (Date.now() - new Date(fechaRef).getTime()) / 3600000 : null;
@@ -999,11 +1000,12 @@
       const filas = c.ventas.map(v => {
         const esPendiente = v.estado !== 'vendida';
         const totalVenta = Number(v.precio_venta) * Number(v.cantidad);
-        // Misma fórmula que usa el backend: precio neto (post-impuesto) menos
-        // el costo real ponderado de lo comprado, por la cantidad de ESTA
-        // venta puntual (no el total de la compra).
+        // Misma fórmula que usa el backend: precio neto (post-impuesto y
+        // post-tarifa de publicación) menos el costo real ponderado de lo
+        // comprado, por la cantidad de ESTA venta puntual (no el total de
+        // la compra).
         const costoBase = Number(c.precio_promedio_compra ?? c.precio_oro);
-        const precioNeto = Number(v.precio_venta) * (1 - Number(v.tax_pct || 0) / 100);
+        const precioNeto = Number(v.precio_venta) * (1 - (Number(v.tax_pct || 0) + Number(v.tarifa_pct || 0)) / 100);
         const ganancia = (precioNeto - costoBase) * Number(v.cantidad);
         const fecha = v.fecha ? new Date(v.fecha).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) : '';
         const badge = esPendiente
@@ -1276,6 +1278,7 @@
       const nota = document.getElementById('atb-compra-nota').value.trim();
       const origen = document.getElementById('atb-compra-origen').value;
       const ya_comprado = chkYaComprado.checked;
+      const tarifa_pct = Number(document.getElementById('atb-setupfee').value) || 0;
 
       if (!city_compra || !city) {
         alert('Selecciona la ciudad de compra y la ciudad actual/destino antes de agregar.');
@@ -1297,7 +1300,7 @@
       await fetch('/api/compras', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item_id, city_compra, city, precio_oro, cantidad, nota, origen, ya_comprado }),
+        body: JSON.stringify({ item_id, city_compra, city, precio_oro, cantidad, nota, origen, ya_comprado, tarifa_pct }),
       });
       renderCompras();
     });
@@ -1318,10 +1321,11 @@
           return;
         }
         const tax_pct = Number(document.getElementById('atb-tax').value) || 0;
+        const tarifa_pct = Number(document.getElementById('atb-setupfee').value) || 0;
         const resp = await fetch('/api/compras/' + id + '/vender', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ precio_venta, cantidad, tax_pct }),
+          body: JSON.stringify({ precio_venta, cantidad, tax_pct, tarifa_pct }),
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
@@ -1440,10 +1444,11 @@
           alert('Ingresa el precio al que se compró.');
           return;
         }
+        const tarifa_pct = Number(document.getElementById('atb-setupfee').value) || 0;
         const resp = await fetch('/api/compras/' + id + '/comprar', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cantidad, precio_pagado }),
+          body: JSON.stringify({ cantidad, precio_pagado, tarifa_pct }),
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
@@ -3092,10 +3097,11 @@
     comprasCapital.forEach(c => {
       if (c.ejecuciones && c.ejecuciones.length) {
         c.ejecuciones.forEach(e => {
+          const costoReal = Number(e.cantidad) * Number(e.precio_pagado) * (1 + Number(e.tarifa_pct || 0) / 100);
           eventosAuto.push({
             fecha: e.fecha || c.fecha_creacion,
             tipo: 'compra',
-            monto: -(Number(e.cantidad) * Number(e.precio_pagado)),
+            monto: -costoReal,
             nota: `Compra: ${c.item_name} ×${e.cantidad} en ${c.city}`,
           });
         });
@@ -3110,7 +3116,7 @@
         });
       }
       (c.ventas || []).filter(v => v.estado === 'vendida').forEach(v => {
-        const precioNeto = Number(v.precio_venta) * (1 - Number(v.tax_pct || 0) / 100);
+        const precioNeto = Number(v.precio_venta) * (1 - (Number(v.tax_pct || 0) + Number(v.tarifa_pct || 0)) / 100);
         eventosAuto.push({
           fecha: v.fecha_vendida || v.fecha,
           tipo: 'venta',
@@ -3356,15 +3362,3 @@
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
