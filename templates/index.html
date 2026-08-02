@@ -679,7 +679,7 @@
     }
     const tax = Number(document.getElementById('atb-tax').value) / 100;
     const minMargin = Number(document.getElementById('atb-minmargin').value) || 0;
-    const precioPagado = Number(c.precio_oro);
+    const precioPagado = Number(c.precio_promedio_compra ?? c.precio_oro);
 
     function escenario(precioRef, fechaRef, nombre) {
       if (!precioRef || precioRef <= 0) return { label: `${nombre}: sin dato`, cls: 'atb-rent-unknown' };
@@ -955,7 +955,15 @@
     // listadas sin confirmar). "Vendida" = c.vendido, todo quedó confirmado.
     const pendientes = compras.filter(c => !c.vendido);
     const vendidas = compras.filter(c => c.vendido);
-    const totalInvertido = pendientes.reduce((sum, c) => sum + Number(c.precio_oro) * Number(c.cantidad_restante), 0);
+    const totalInvertido = pendientes.reduce((sum, c) => {
+      const pendienteCompra = Number(c.cantidad_pendiente_compra || 0);
+      const costoReal = Number(c.costo_total_comprado || 0) + pendienteCompra * Number(c.precio_oro);
+      // Solo cuenta lo que aún no se ha recuperado vendiendo (confirmado o listado).
+      const yaComprometidoVenta = Number(c.cantidad_comprada || 0) > 0
+        ? ((Number(c.cantidad_vendida || 0) + Number(c.cantidad_pendiente_venta || 0)) / Number(c.cantidad_comprada)) * Number(c.costo_total_comprado || 0)
+        : 0;
+      return sum + Math.max(0, costoReal - yaComprometidoVenta);
+    }, 0);
 
     // Agrupa pendientes por ciudad para que sea fácil ver "qué tengo dónde"
     const porCiudad = {};
@@ -970,26 +978,31 @@
         const esPendiente = v.estado !== 'vendida';
         const totalVenta = Number(v.precio_venta) * Number(v.cantidad);
         // Misma fórmula que usa el backend: precio neto (post-impuesto) menos
-        // lo que costó, por la cantidad de ESTA venta puntual (no el total
-        // de la compra).
+        // el costo real ponderado de lo comprado, por la cantidad de ESTA
+        // venta puntual (no el total de la compra).
+        const costoBase = Number(c.precio_promedio_compra ?? c.precio_oro);
         const precioNeto = Number(v.precio_venta) * (1 - Number(v.tax_pct || 0) / 100);
-        const ganancia = (precioNeto - Number(c.precio_oro)) * Number(v.cantidad);
+        const ganancia = (precioNeto - costoBase) * Number(v.cantidad);
         const fecha = v.fecha ? new Date(v.fecha).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) : '';
         const badge = esPendiente
           ? `<span class="atb-rent-badge atb-rent-warn" style="font-size:10px;">Pendiente</span>`
           : `<span class="atb-rent-badge atb-rent-ok" style="font-size:10px;">Vendida</span>`;
+        const cantCell = esPendiente
+          ? `<input type="number" class="atb-venta-cant-edit" data-id="${v.id}" value="${v.cantidad}" min="0.0001" step="any" style="width:60px;">`
+          : `<span>${v.cantidad}</span>`;
         const precioCell = esPendiente
           ? `<input type="number" class="atb-venta-precio-edit" data-id="${v.id}" value="${v.precio_venta}" min="0" style="width:80px;">`
           : `<span>${Math.round(v.precio_venta).toLocaleString('es-CO')}</span>`;
         const acciones = esPendiente
-          ? `<button class="atb-btn atb-venta-guardar-precio" data-id="${v.id}" style="padding:3px 8px; font-size:10px;">Guardar precio</button>
+          ? `<button class="atb-btn atb-venta-guardar-precio" data-id="${v.id}" style="padding:3px 8px; font-size:10px;">Guardar</button>
              <button class="atb-btn atb-venta-marcar-vendida" data-id="${v.id}" style="padding:3px 8px; font-size:10px; background:var(--teal); color:#0d1712;">Marcar vendida</button>`
           : `<button class="atb-event-del atb-venta-marcar-pendiente" data-id="${v.id}" style="font-size:10px;">Revertir a pendiente</button>`;
         return `
           <div style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:11px; border-top:1px solid var(--hairline); flex-wrap:wrap;">
             <span style="color:var(--text-muted); width:55px;">${fecha}</span>
             ${badge}
-            <span style="color:var(--text-muted);">${v.cantidad} uds ×</span>
+            ${cantCell}
+            <span style="color:var(--text-muted);">uds ×</span>
             ${precioCell}
             <span style="color:#7fc9a3; font-weight:600;">+${Math.round(totalVenta).toLocaleString('es-CO')}</span>
             <span style="color:${ganancia >= 0 ? '#7fc9a3' : '#d97a7a'};">(${ganancia >= 0 ? '+' : ''}${Math.round(ganancia).toLocaleString('es-CO')}${esPendiente ? ' est.' : ''})</span>
@@ -997,12 +1010,34 @@
             <button class="atb-event-del atb-venta-del" data-id="${v.id}" style="margin-left:auto; font-size:10px;">Borrar venta</button>
           </div>`;
       }).join('');
-      return `<div style="margin-top:6px; padding-left:4px;">${filas}</div>`;
+      return `<div style="margin-top:6px; padding-left:4px;"><div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Ventas parciales</div>${filas}</div>`;
+    }
+
+    function ejecucionesSubfila(c) {
+      if (!c.ejecuciones || !c.ejecuciones.length) return '';
+      const filas = c.ejecuciones.map(e => {
+        const total = Number(e.cantidad) * Number(e.precio_pagado);
+        const fecha = e.fecha ? new Date(e.fecha).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) : '';
+        return `
+          <div style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:11px; border-top:1px solid var(--hairline); flex-wrap:wrap;">
+            <span style="color:var(--text-muted); width:55px;">${fecha}</span>
+            <span class="atb-rent-badge atb-rent-ok" style="font-size:10px;">Comprado</span>
+            <input type="number" class="atb-ejecucion-cant-edit" data-id="${e.id}" value="${e.cantidad}" min="0.0001" step="any" style="width:60px;">
+            <span style="color:var(--text-muted);">uds ×</span>
+            <input type="number" class="atb-ejecucion-precio-edit" data-id="${e.id}" value="${e.precio_pagado}" min="0" style="width:80px;">
+            <span style="color:#d97a7a; font-weight:600;">-${Math.round(total).toLocaleString('es-CO')}</span>
+            <button class="atb-btn atb-ejecucion-guardar" data-id="${e.id}" style="padding:3px 8px; font-size:10px;">Guardar</button>
+            <button class="atb-event-del atb-ejecucion-del" data-id="${e.id}" style="margin-left:auto; font-size:10px;">Borrar</button>
+          </div>`;
+      }).join('');
+      return `<div style="margin-top:6px; padding-left:4px;"><div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Ejecuciones de la orden de compra (${c.cantidad_comprada} de ${c.cantidad} ya compradas)</div>${filas}</div>`;
     }
 
     function rowCompra(c) {
-      const totalCompra = Number(c.precio_oro) * Number(c.cantidad);
-      const restanteSinListar = Number(c.cantidad_restante);
+      const pendienteCompra = Number(c.cantidad_pendiente_compra ?? 0);
+      const esOrdenAbierta = pendienteCompra > 0.0001;
+      const costoRealTotal = Number(c.costo_total_comprado || 0) + pendienteCompra * Number(c.precio_oro);
+      const restanteSinListar = Number(c.cantidad_disponible_venta ?? c.cantidad_restante);
       const pendienteVenta = Number(c.cantidad_pendiente_venta || 0);
       const cancelada = c.estado === 'cancelado';
       const ruta = c.city_compra
@@ -1012,7 +1047,9 @@
       const estadoCell = c.vendido
         ? `<span class="atb-rent-badge atb-rent-ok">Ejecución total</span>`
         : `
-          <div style="margin-bottom:6px;"><span class="atb-rent-badge atb-rent-warn">Pendiente por ejecutar</span></div>
+          <div style="margin-bottom:6px;">
+            ${esOrdenAbierta ? `<span class="atb-rent-badge atb-rent-warn">Orden abierta — faltan ${pendienteCompra} por comprar</span>` : `<span class="atb-rent-badge atb-rent-warn">Pendiente por ejecutar</span>`}
+          </div>
           ${estado.sinDatos
             ? `<div style="color:var(--text-muted); font-size:11px;">${estado.label}<br>${estado.detalle}</div>`
             : `
@@ -1025,17 +1062,37 @@
                 <div style="color:var(--text-muted); font-size:10px; margin-top:2px;">${estado.listada.detalle || ''}</div>
               </div>
             `}`;
-      const cantidadCell = (Number(c.cantidad_vendida) > 0 || pendienteVenta > 0)
-        ? `${restanteSinListar} <span style="color:var(--text-muted); font-size:10px;">sin listar de ${c.cantidad}</span>${pendienteVenta > 0 ? `<div style="color:#e0a53a; font-size:10px;">${pendienteVenta} listadas, sin confirmar</div>` : ''}`
+      const cantidadCell = (Number(c.cantidad_vendida) > 0 || pendienteVenta > 0 || esOrdenAbierta)
+        ? `${restanteSinListar} <span style="color:var(--text-muted); font-size:10px;">sin listar de ${c.cantidad_comprada} comprad${c.cantidad_comprada === 1 ? 'a' : 'as'}</span>${esOrdenAbierta ? `<div style="color:#e0a53a; font-size:10px;">${pendienteCompra} sin comprar todavía (orden abierta)</div>` : ''}${pendienteVenta > 0 ? `<div style="color:#e0a53a; font-size:10px;">${pendienteVenta} listadas, sin confirmar</div>` : ''}`
         : `${c.cantidad}`;
       const sinCupoParaVender = c.vendido || cancelada || restanteSinListar <= 0.0001;
       const ventaForm = sinCupoParaVender
-        ? `<span style="color:var(--text-muted); font-size:11px;">—</span>`
+        ? `<span style="color:var(--text-muted); font-size:11px;">${esOrdenAbierta && !cancelada ? 'Aún no hay stock comprado para vender.' : '—'}</span>`
         : `
           <div style="display:flex; flex-direction:column; gap:4px;">
-            <input type="number" class="atb-compra-cant-venta" data-id="${c.id}" min="0.0001" max="${restanteSinListar}" step="any" value="${restanteSinListar}" placeholder="cant." style="width:70px;" title="Cantidad a listar para venta (por defecto: todo lo que falta por listar)">
+            <input type="number" class="atb-compra-cant-venta" data-id="${c.id}" min="0.0001" max="${restanteSinListar}" step="any" value="${restanteSinListar}" placeholder="cant." style="width:70px;" title="Cantidad a listar para venta (por defecto: todo lo comprado que falta por listar)">
             <input type="number" class="atb-compra-precio-venta" data-id="${c.id}" min="0" placeholder="precio c/u" style="width:90px;">
           </div>`;
+      // Editar precio/cantidad de la orden — deshabilitado si ya está cerrada o cancelada
+      const ordenEditable = !c.vendido && !cancelada;
+      const precioCell = ordenEditable
+        ? `<input type="number" class="atb-orden-precio-edit" data-id="${c.id}" value="${c.precio_oro}" min="0" style="width:80px;" title="Precio vigente de la orden para lo que falta comprar">`
+        : `${Math.round(c.precio_oro).toLocaleString('es-CO')}`;
+      const cantidadOrdenCell = ordenEditable
+        ? `<input type="number" class="atb-orden-cantidad-edit" data-id="${c.id}" value="${c.cantidad}" min="${c.cantidad_comprada}" step="any" style="width:70px; margin-top:4px;" title="Cantidad total deseada en la orden">`
+        : '';
+      const guardarOrdenBtn = ordenEditable
+        ? `<button class="atb-btn atb-orden-guardar" data-id="${c.id}" style="padding:3px 8px; font-size:10px; margin-top:4px;">Actualizar orden</button>`
+        : '';
+      const comprarForm = (esOrdenAbierta && !cancelada)
+        ? `
+          <div style="display:flex; flex-direction:column; gap:4px; margin-top:6px; padding-top:6px; border-top:1px dashed var(--hairline);">
+            <span style="font-size:10px; color:var(--text-muted);">Registrar compra ejecutada:</span>
+            <input type="number" class="atb-orden-cant-comprar" data-id="${c.id}" min="0.0001" max="${pendienteCompra}" step="any" value="${pendienteCompra}" placeholder="cant." style="width:70px;" title="Cantidad que se llenó (por defecto: todo lo que falta)">
+            <input type="number" class="atb-orden-precio-comprar" data-id="${c.id}" min="0" value="${c.precio_oro}" placeholder="precio pagado c/u" style="width:90px;">
+            <button class="atb-btn atb-orden-comprar-btn" data-id="${c.id}" style="padding:3px 8px; font-size:10px; background:var(--teal); color:#0d1712;">Registrar compra</button>
+          </div>`
+        : '';
       const gananciaAcum = Number(c.ganancia_acumulada || 0);
       const gananciaPend = Number(c.ganancia_pendiente_estimada || 0);
       const gananciaTag = c.ventas && c.ventas.length
@@ -1043,23 +1100,24 @@
         : '';
       const esRecoleccion = c.origen === 'recoleccion';
       const nombreCell = `${itemIcon(c.item_id)}${c.item_name}${esRecoleccion ? '<div><span class="atb-rent-badge" style="font-size:10px; margin-top:4px; color:var(--teal); border-color:var(--teal); background:rgba(0,0,0,0);">Recolectado — no usa capital</span></div>' : ''}${cancelada ? '<div><span class="atb-rent-badge atb-rent-bad" style="font-size:10px; margin-top:4px;">Cancelada</span></div>' : ''}`;
+      const subfilas = [ejecucionesSubfila(c), ventasSubfila(c)].filter(Boolean).join('');
       return `
         <tr>
           <td class="atb-item-name">${nombreCell}</td>
           <td class="atb-route">${ruta}</td>
-          <td>${Math.round(c.precio_oro).toLocaleString('es-CO')}</td>
+          <td>${precioCell}${cantidadOrdenCell}${guardarOrdenBtn}</td>
           <td>${cantidadCell}</td>
-          <td style="color:#d97a7a; font-weight:600;">-${Math.round(totalCompra).toLocaleString('es-CO')}${gananciaTag}</td>
+          <td style="color:#d97a7a; font-weight:600;">-${Math.round(costoRealTotal).toLocaleString('es-CO')}${esOrdenAbierta ? `<div style="font-size:10px; color:var(--text-muted); font-weight:400;">(${Math.round(Number(c.costo_total_comprado || 0)).toLocaleString('es-CO')} ya pagado)</div>` : ''}${gananciaTag}</td>
           <td style="font-size:11px; color:var(--text-muted);">${c.nota || ''}</td>
           <td>${estadoCell}</td>
-          <td>${ventaForm}</td>
+          <td>${ventaForm}${comprarForm}</td>
           <td>
             ${sinCupoParaVender ? '' : `<button class="atb-btn atb-compra-vender-btn" style="padding:5px 10px; font-size:11px;" data-id="${c.id}">Registrar venta</button>`}
             <button class="atb-btn atb-compra-estado-btn" data-id="${c.id}" data-nuevo-estado="${cancelada ? 'en_ejecucion' : 'cancelado'}" style="padding:5px 10px; font-size:11px; background:${cancelada ? 'var(--teal)' : 'var(--panel-raised)'}; color:${cancelada ? '#0d1712' : 'var(--text-muted)'}; border:1px solid var(--hairline);">${cancelada ? 'Reactivar' : 'Cancelar compra'}</button>
             <button class="atb-event-del atb-compra-del" data-id="${c.id}">Borrar compra</button>
           </td>
         </tr>
-        ${c.ventas && c.ventas.length ? `<tr><td colspan="9" style="padding-top:0;">${ventasSubfila(c)}</td></tr>` : ''}`;
+        ${subfilas ? `<tr><td colspan="9" style="padding-top:0;">${subfilas}</td></tr>` : ''}`;
     }
 
     const resumenCiudades = Object.entries(porCiudad)
@@ -1069,7 +1127,7 @@
     // Resumen de ganancias / pérdidas — solo cuenta ventas CONFIRMADAS
     // ("vendida"); lo pendiente de confirmar es solo un estimado, no plata real.
     const gananciaNeta = compras.reduce((sum, c) => sum + Number(c.ganancia_acumulada || 0), 0);
-    const ventasConfirmadas = compras.flatMap(c => (c.ventas || []).filter(v => v.estado === 'vendida').map(v => ({ ...v, precio_oro: c.precio_oro })));
+    const ventasConfirmadas = compras.flatMap(c => (c.ventas || []).filter(v => v.estado === 'vendida').map(v => ({ ...v, precio_oro: c.precio_promedio_compra ?? c.precio_oro })));
     const totalVendidoPlata = ventasConfirmadas.reduce((sum, v) => sum + Number(v.precio_venta) * Number(v.cantidad), 0);
     const totalInvertidoVendido = ventasConfirmadas.reduce((sum, v) => sum + Number(v.precio_oro) * Number(v.cantidad), 0);
     const roiPct = totalInvertidoVendido > 0 ? (gananciaNeta / totalInvertidoVendido * 100) : 0;
@@ -1094,6 +1152,14 @@
         <div class="atb-field" style="grid-column: span 2;"><label for="atb-compra-nota">Nota (opcional)</label><input type="text" id="atb-compra-nota" placeholder="ej. para craftear, para vender en Caerleon..."></div>
         <div class="atb-field" style="grid-column: span 2; flex-direction:row; align-items:center; gap:18px;">
           <label style="display:flex; align-items:center; gap:6px; font-weight:600; cursor:pointer;">
+            <input type="checkbox" id="atb-compra-ya-comprado" checked style="width:auto;"> Ya compré toda la cantidad (compra instantánea)
+          </label>
+        </div>
+        <p id="atb-compra-orden-hint" style="display:none; grid-column: span 2; font-size:11px; color:var(--text-muted); margin:0;">
+          Se crea como una <strong>orden</strong> sin nada comprado todavía — la cantidad de arriba es el total que quieres, y el precio es el que estás pidiendo ahora mismo. Luego, en la fila de la orden, vas registrando cada vez que te llenen parte de ella (con el precio real al que se ejecutó), y puedes subir/bajar el precio de lo que falta cuantas veces necesites.
+        </p>
+        <div class="atb-field" style="grid-column: span 2; flex-direction:row; align-items:center; gap:18px;">
+          <label style="display:flex; align-items:center; gap:6px; font-weight:600; cursor:pointer;">
             <input type="checkbox" id="atb-compra-destino-revender" checked style="width:auto;"> Para revender (se queda aquí, en Mis compras)
           </label>
           <label style="display:flex; align-items:center; gap:6px; font-weight:600; cursor:pointer;">
@@ -1111,7 +1177,7 @@
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
         Pendientes (${pendientes.length}) · <span style="color:#d97a7a; font-weight:600;">-${Math.round(totalInvertido).toLocaleString('es-CO')}</span> plata invertida sin vender${cantVentasPendientes ? ` · ${cantVentasPendientes} venta(s) esperando confirmación` : ''}
       </p>
-      <table class="atb-table"><thead><tr><th>Item</th><th>Ruta (compra → actual)</th><th>Precio c/u</th><th>Cant. (sin listar)</th><th>Total invertido</th><th>Nota</th><th>Estado</th><th>Registrar venta parcial</th><th></th></tr></thead>
+      <table class="atb-table"><thead><tr><th>Item</th><th>Ruta (compra → actual)</th><th>Precio orden (c/u)</th><th>Cant. (sin listar)</th><th>Total invertido</th><th>Nota</th><th>Estado</th><th>Registrar venta parcial</th><th></th></tr></thead>
       <tbody>${pendientes.map(c => rowCompra(c)).join('') || '<tr><td colspan="9" class="atb-empty">Sin compras pendientes.</td></tr>'}</tbody></table>
 
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:22px 0 8px;">Ganancias y pérdidas (solo ventas CONFIRMADAS) — ya con el % de impuesto de mercado descontado</p>
@@ -1138,6 +1204,12 @@
     chkRevender.addEventListener('change', () => { if (chkRevender.checked) chkInventario.checked = false; });
     chkInventario.addEventListener('change', () => { if (chkInventario.checked) chkRevender.checked = false; });
 
+    const chkYaComprado = document.getElementById('atb-compra-ya-comprado');
+    const ordenHint = document.getElementById('atb-compra-orden-hint');
+    chkYaComprado.addEventListener('change', () => {
+      ordenHint.style.display = chkYaComprado.checked ? 'none' : 'block';
+    });
+
     document.getElementById('atb-compra-add').addEventListener('click', async () => {
       const precio_oro = Number(document.getElementById('atb-compra-precio').value);
       if (isNaN(precio_oro) || precio_oro < 0) return;
@@ -1147,6 +1219,7 @@
       const cantidad = Number(document.getElementById('atb-compra-cantidad').value) || 1;
       const nota = document.getElementById('atb-compra-nota').value.trim();
       const origen = document.getElementById('atb-compra-origen').value;
+      const ya_comprado = chkYaComprado.checked;
 
       if (!city_compra || !city) {
         alert('Selecciona la ciudad de compra y la ciudad actual/destino antes de agregar.');
@@ -1168,7 +1241,7 @@
       await fetch('/api/compras', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item_id, city_compra, city, precio_oro, cantidad, nota, origen }),
+        body: JSON.stringify({ item_id, city_compra, city, precio_oro, cantidad, nota, origen, ya_comprado }),
       });
       renderCompras();
     });
@@ -1206,20 +1279,26 @@
     contentEl.querySelectorAll('.atb-venta-guardar-precio').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id = btn.dataset.id;
-        const input = contentEl.querySelector(`.atb-venta-precio-edit[data-id="${id}"]`);
-        const precio_venta = Number(input ? input.value : 0);
+        const precioInput = contentEl.querySelector(`.atb-venta-precio-edit[data-id="${id}"]`);
+        const cantInput = contentEl.querySelector(`.atb-venta-cant-edit[data-id="${id}"]`);
+        const precio_venta = Number(precioInput ? precioInput.value : 0);
+        const cantidad = Number(cantInput ? cantInput.value : 0);
         if (!precio_venta || precio_venta <= 0) {
           alert('Ingresa un precio válido.');
+          return;
+        }
+        if (!cantidad || cantidad <= 0) {
+          alert('Ingresa una cantidad válida.');
           return;
         }
         const resp = await fetch('/api/compras/ventas/' + id, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ precio_venta }),
+          body: JSON.stringify({ precio_venta, cantidad }),
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
-          alert(err.error || 'No se pudo actualizar el precio.');
+          alert(err.error || 'No se pudo actualizar la venta.');
           return;
         }
         renderCompras();
@@ -1261,6 +1340,92 @@
     contentEl.querySelectorAll('.atb-compra-del').forEach(btn => {
       btn.addEventListener('click', async () => {
         await fetch('/api/compras/' + btn.dataset.id, { method: 'DELETE' });
+        renderCompras();
+      });
+    });
+
+    contentEl.querySelectorAll('.atb-orden-guardar').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const precioInput = contentEl.querySelector(`.atb-orden-precio-edit[data-id="${id}"]`);
+        const cantInput = contentEl.querySelector(`.atb-orden-cantidad-edit[data-id="${id}"]`);
+        const precio_oro = Number(precioInput ? precioInput.value : 0);
+        const cantidad = Number(cantInput ? cantInput.value : 0);
+        if (!precio_oro || precio_oro <= 0) {
+          alert('Ingresa un precio válido.');
+          return;
+        }
+        const resp = await fetch('/api/compras/' + id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ precio_oro, cantidad }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          alert(err.error || 'No se pudo actualizar la orden.');
+          return;
+        }
+        renderCompras();
+      });
+    });
+
+    contentEl.querySelectorAll('.atb-orden-comprar-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const cantInput = contentEl.querySelector(`.atb-orden-cant-comprar[data-id="${id}"]`);
+        const precioInput = contentEl.querySelector(`.atb-orden-precio-comprar[data-id="${id}"]`);
+        const cantidad = Number(cantInput ? cantInput.value : 0);
+        const precio_pagado = Number(precioInput ? precioInput.value : 0);
+        if (!cantidad || cantidad <= 0) {
+          alert('Ingresa una cantidad válida.');
+          return;
+        }
+        if (!precio_pagado || precio_pagado <= 0) {
+          alert('Ingresa el precio al que se compró.');
+          return;
+        }
+        const resp = await fetch('/api/compras/' + id + '/comprar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cantidad, precio_pagado }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          alert(err.error || 'No se pudo registrar la compra.');
+          return;
+        }
+        renderCompras();
+      });
+    });
+
+    contentEl.querySelectorAll('.atb-ejecucion-guardar').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const cantInput = contentEl.querySelector(`.atb-ejecucion-cant-edit[data-id="${id}"]`);
+        const precioInput = contentEl.querySelector(`.atb-ejecucion-precio-edit[data-id="${id}"]`);
+        const cantidad = Number(cantInput ? cantInput.value : 0);
+        const precio_pagado = Number(precioInput ? precioInput.value : 0);
+        if (!cantidad || cantidad <= 0 || !precio_pagado || precio_pagado <= 0) {
+          alert('Ingresa cantidad y precio válidos.');
+          return;
+        }
+        const resp = await fetch('/api/compras/ejecuciones/' + id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cantidad, precio_pagado }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          alert(err.error || 'No se pudo actualizar la ejecución.');
+          return;
+        }
+        renderCompras();
+      });
+    });
+
+    contentEl.querySelectorAll('.atb-ejecucion-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch('/api/compras/ejecuciones/' + btn.dataset.id, { method: 'DELETE' });
         renderCompras();
       });
     });
@@ -2335,7 +2500,10 @@
     // 6. Mis compras — pendientes y ganancia neta ya realizada
     const comprasPendientes = compras.filter(c => !c.vendido);
     const comprasVendidas = compras.filter(c => c.vendido);
-    const totalInvertidoPendiente = comprasPendientes.reduce((s, c) => s + Number(c.precio_oro) * Number(c.cantidad_restante), 0);
+    const totalInvertidoPendiente = comprasPendientes.reduce((s, c) => {
+      const pendienteCompra = Number(c.cantidad_pendiente_compra || 0);
+      return s + Number(c.costo_total_comprado || 0) + pendienteCompra * Number(c.precio_oro);
+    }, 0);
     const gananciaNetaCompras = compras.reduce((s, c) => s + Number(c.ganancia_acumulada || 0), 0);
 
     // 7. Viajes — ruta con más riesgo (mínimo 3 viajes para que el % signifique algo)
@@ -2825,10 +2993,21 @@
     const capitalAportado = movimientos.reduce((s, m) => s + (m.tipo === 'aporte' ? Number(m.monto) : -Number(m.monto)), 0);
 
     // Capital comprometido = plata metida en compras activas que todavía no
-    // volvió como efectivo (ni sin listar, ni listada-sin-confirmar).
+    // volvió como efectivo. Dos partes:
+    // - lo YA comprado (a su costo real ponderado) que no se ha recuperado
+    //   vendiendo (ni confirmado, ni listado-sin-confirmar todavía) —
+    //   backend ya lo calcula como cantidad_disponible_venta
+    // - lo que la orden aún no ha llenado, valorado al precio vigente de la
+    //   orden (lo que el juego reserva/pediría para completarla)
     const capitalComprometido = comprasCapital.reduce((s, c) => {
-      const cantidadSinRecuperar = Number(c.cantidad_restante) + Number(c.cantidad_pendiente_venta || 0);
-      return s + Number(c.precio_oro) * cantidadSinRecuperar;
+      const cantidadComprada = Number(c.cantidad_comprada || 0);
+      const costoRealComprado = Number(c.costo_total_comprado || 0);
+      const cantidadSinRecuperar = Number(c.cantidad_disponible_venta || 0);
+      const costoSinRecuperar = cantidadComprada > 0
+        ? (cantidadSinRecuperar / cantidadComprada) * costoRealComprado
+        : 0;
+      const valorOrdenPendiente = Number(c.cantidad_pendiente_compra || 0) * Number(c.precio_oro);
+      return s + Math.max(0, costoSinRecuperar) + valorOrdenPendiente;
     }, 0);
 
     // Ganancia ya realizada (ventas confirmadas) y estimada (listadas, sin confirmar todavía) — SOLO de compras hechas con capital.
@@ -2855,12 +3034,25 @@
     // registrar nada dos veces. Solo entra lo que usa capital (origen "compra").
     const eventosAuto = [];
     comprasCapital.forEach(c => {
-      eventosAuto.push({
-        fecha: c.fecha_creacion,
-        tipo: 'compra',
-        monto: -(Number(c.precio_oro) * Number(c.cantidad)),
-        nota: `Compra: ${c.item_name} ×${c.cantidad} en ${c.city}`,
-      });
+      if (c.ejecuciones && c.ejecuciones.length) {
+        c.ejecuciones.forEach(e => {
+          eventosAuto.push({
+            fecha: e.fecha || c.fecha_creacion,
+            tipo: 'compra',
+            monto: -(Number(e.cantidad) * Number(e.precio_pagado)),
+            nota: `Compra: ${c.item_name} ×${e.cantidad} en ${c.city}`,
+          });
+        });
+      } else {
+        // Compra vieja sin ejecuciones registradas (de antes de este cambio) — se
+        // muestra como un solo evento nominal para no perder el historial.
+        eventosAuto.push({
+          fecha: c.fecha_creacion,
+          tipo: 'compra',
+          monto: -(Number(c.precio_oro) * Number(c.cantidad)),
+          nota: `Compra: ${c.item_name} ×${c.cantidad} en ${c.city}`,
+        });
+      }
       (c.ventas || []).filter(v => v.estado === 'vendida').forEach(v => {
         const precioNeto = Number(v.precio_venta) * (1 - Number(v.tax_pct || 0) / 100);
         eventosAuto.push({
@@ -3108,6 +3300,7 @@
 </script>
 </body>
 </html>
+
 
 
 
