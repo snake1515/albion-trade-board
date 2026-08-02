@@ -1020,18 +1020,24 @@
         const acciones = esPendiente
           ? `<button class="atb-btn atb-venta-guardar-precio" data-id="${v.id}" style="padding:3px 8px; font-size:10px;">Guardar</button>
              <button class="atb-btn atb-venta-marcar-vendida" data-id="${v.id}" style="padding:3px 8px; font-size:10px; background:var(--teal); color:#0d1712;">Marcar vendida</button>`
-          : `<button class="atb-event-del atb-venta-marcar-pendiente" data-id="${v.id}" style="font-size:10px;">Revertir a pendiente</button>`;
+          : `<button class="atb-btn atb-venta-nota-guardar" data-id="${v.id}" style="padding:3px 8px; font-size:10px;">Guardar nota</button>
+             <button class="atb-event-del atb-venta-marcar-pendiente" data-id="${v.id}" style="font-size:10px;">Revertir a pendiente</button>`;
         return `
-          <div class="atb-block-row">
-            <span style="color:var(--text-muted); width:55px;">${fecha}</span>
-            ${badge}
-            ${cantCell}
-            <span style="color:var(--text-muted);">uds ×</span>
-            ${precioCell}
-            <span style="color:#7fc9a3; font-weight:600;">+${Math.round(totalVenta).toLocaleString('es-CO')}</span>
-            <span style="color:${ganancia >= 0 ? '#7fc9a3' : '#d97a7a'};">(${ganancia >= 0 ? '+' : ''}${Math.round(ganancia).toLocaleString('es-CO')}${esPendiente ? ' est.' : ''})</span>
-            ${acciones}
-            <button class="atb-event-del atb-venta-del" data-id="${v.id}" style="margin-left:auto; font-size:10px;">Borrar venta</button>
+          <div class="atb-block-row" style="flex-direction:column; align-items:stretch;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <span style="color:var(--text-muted); width:55px;">${fecha}</span>
+              ${badge}
+              ${cantCell}
+              <span style="color:var(--text-muted);">uds ×</span>
+              ${precioCell}
+              <span style="color:#7fc9a3; font-weight:600;">+${Math.round(totalVenta).toLocaleString('es-CO')}</span>
+              <span style="color:${ganancia >= 0 ? '#7fc9a3' : '#d97a7a'};">(${ganancia >= 0 ? '+' : ''}${Math.round(ganancia).toLocaleString('es-CO')}${esPendiente ? ' est.' : ''})</span>
+              ${acciones}
+              <button class="atb-event-del atb-venta-del" data-id="${v.id}" style="margin-left:auto; font-size:10px;">Borrar venta</button>
+            </div>
+            <div style="margin-top:4px; padding-left:63px;">
+              <input type="text" class="atb-venta-nota-edit" data-id="${v.id}" value="${(v.nota || '').replace(/"/g, '&quot;')}" placeholder="nota (ej. estas 20 van para Caerleon)" style="width:260px; font-size:10.5px;">
+            </div>
           </div>`;
       }).join('');
       return `<div class="atb-ventas-block"><div class="atb-block-title">💰 Ventas parciales (dinero que entra)</div>${filas}</div>`;
@@ -1043,15 +1049,20 @@
         const total = Number(e.cantidad) * Number(e.precio_pagado);
         const fecha = e.fecha ? new Date(e.fecha).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) : '';
         return `
-          <div class="atb-block-row">
-            <span style="color:var(--text-muted); width:55px;">${fecha}</span>
-            <span class="atb-rent-badge atb-rent-ok" style="font-size:10px;">Comprado</span>
-            <input type="number" class="atb-ejecucion-cant-edit" data-id="${e.id}" value="${e.cantidad}" min="0.0001" step="any" style="width:60px;">
-            <span style="color:var(--text-muted);">uds ×</span>
-            <input type="number" class="atb-ejecucion-precio-edit" data-id="${e.id}" value="${e.precio_pagado}" min="0" style="width:80px;">
-            <span style="color:#d97a7a; font-weight:600;">-${Math.round(total).toLocaleString('es-CO')}</span>
-            <button class="atb-btn atb-ejecucion-guardar" data-id="${e.id}" style="padding:3px 8px; font-size:10px;">Guardar</button>
-            <button class="atb-event-del atb-ejecucion-del" data-id="${e.id}" style="margin-left:auto; font-size:10px;">Borrar</button>
+          <div class="atb-block-row" style="flex-direction:column; align-items:stretch;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <span style="color:var(--text-muted); width:55px;">${fecha}</span>
+              <span class="atb-rent-badge atb-rent-ok" style="font-size:10px;">Comprado</span>
+              <input type="number" class="atb-ejecucion-cant-edit" data-id="${e.id}" value="${e.cantidad}" min="0.0001" step="any" style="width:60px;">
+              <span style="color:var(--text-muted);">uds ×</span>
+              <input type="number" class="atb-ejecucion-precio-edit" data-id="${e.id}" value="${e.precio_pagado}" min="0" style="width:80px;">
+              <span style="color:#d97a7a; font-weight:600;">-${Math.round(total).toLocaleString('es-CO')}</span>
+              <button class="atb-btn atb-ejecucion-guardar" data-id="${e.id}" style="padding:3px 8px; font-size:10px;">Guardar</button>
+              <button class="atb-event-del atb-ejecucion-del" data-id="${e.id}" style="margin-left:auto; font-size:10px;">Borrar</button>
+            </div>
+            <div style="margin-top:4px; padding-left:63px;">
+              <input type="text" class="atb-ejecucion-nota-edit" data-id="${e.id}" value="${(e.nota || '').replace(/"/g, '&quot;')}" placeholder="nota (opcional)" style="width:260px; font-size:10.5px;">
+            </div>
           </div>`;
       }).join('');
       return `<div class="atb-ejecuciones-block"><div class="atb-block-title">🛒 Ejecuciones de la orden de compra — ${c.cantidad_comprada} de ${c.cantidad} ya compradas (dinero que sale)</div>${filas}</div>`;
@@ -1102,6 +1113,7 @@
           <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:end;">
             <input type="number" class="atb-compra-cant-venta" data-id="${c.id}" min="0.0001" max="${restanteSinListar}" step="any" value="${restanteSinListar}" placeholder="cant." style="width:70px;" title="Cantidad a listar para venta (por defecto: todo lo comprado que falta por listar)">
             <input type="number" class="atb-compra-precio-venta" data-id="${c.id}" min="0" placeholder="precio c/u" style="width:90px;">
+            <input type="text" class="atb-compra-nota-venta" data-id="${c.id}" placeholder="nota (ej. estas van para Caerleon)" style="width:170px; font-size:11px;">
             <button class="atb-btn atb-compra-vender-btn" style="padding:6px 10px; font-size:11px;" data-id="${c.id}">Registrar venta</button>
           </div>`;
       // Editar precio/cantidad de la orden — deshabilitado si ya está cerrada o cancelada
@@ -1121,6 +1133,7 @@
             <div style="display:flex; gap:6px; align-items:end; flex-wrap:wrap;">
               <input type="number" class="atb-orden-cant-comprar" data-id="${c.id}" min="0.0001" max="${pendienteCompra}" step="any" value="${pendienteCompra}" placeholder="cant." style="width:70px;" title="Cantidad que se llenó (por defecto: todo lo que falta)">
               <input type="number" class="atb-orden-precio-comprar" data-id="${c.id}" min="0" value="${c.precio_oro}" placeholder="precio pagado c/u" style="width:90px;">
+              <input type="text" class="atb-orden-nota-comprar" data-id="${c.id}" placeholder="nota (opcional)" style="width:150px; font-size:11px;">
               <button class="atb-btn atb-orden-comprar-btn" data-id="${c.id}" style="padding:6px 10px; font-size:11px; background:var(--teal); color:#0d1712;">Registrar compra</button>
             </div>
           </div>`
@@ -1167,7 +1180,12 @@
               <label>Rentabilidad ahora</label>
               ${estadoCell}
             </div>
-            ${c.nota ? `<div><label>Nota</label><span style="font-size:11px; color:var(--text-muted);">${c.nota}</span></div>` : ''}
+            <div>
+              <label>Nota de la orden</label>
+              ${ordenEditable
+                ? `<div style="display:flex; gap:6px;"><input type="text" class="atb-orden-nota-edit" data-id="${c.id}" value="${(c.nota || '').replace(/"/g, '&quot;')}" placeholder="ej. para vender en Caerleon" style="flex:1; font-size:11px;"><button class="atb-btn atb-orden-nota-guardar" data-id="${c.id}" style="padding:4px 8px; font-size:10px;">Guardar</button></div>`
+                : `<span style="font-size:11px; color:var(--text-muted);">${c.nota || '—'}</span>`}
+            </div>
           </div>
 
           ${!sinCupoParaVender || comprarForm ? `
@@ -1310,8 +1328,10 @@
         const id = btn.dataset.id;
         const precioInput = contentEl.querySelector(`.atb-compra-precio-venta[data-id="${id}"]`);
         const cantInput = contentEl.querySelector(`.atb-compra-cant-venta[data-id="${id}"]`);
+        const notaInput = contentEl.querySelector(`.atb-compra-nota-venta[data-id="${id}"]`);
         const precio_venta = Number(precioInput ? precioInput.value : 0);
         const cantidad = Number(cantInput ? cantInput.value : 0);
+        const nota = notaInput ? notaInput.value.trim() : '';
         if (!precio_venta || precio_venta <= 0) {
           alert('Ingresa el precio de venta (c/u) antes de registrar la venta.');
           return;
@@ -1325,7 +1345,7 @@
         const resp = await fetch('/api/compras/' + id + '/vender', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ precio_venta, cantidad, tax_pct, tarifa_pct }),
+          body: JSON.stringify({ precio_venta, cantidad, tax_pct, tarifa_pct, nota }),
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
@@ -1341,8 +1361,10 @@
         const id = btn.dataset.id;
         const precioInput = contentEl.querySelector(`.atb-venta-precio-edit[data-id="${id}"]`);
         const cantInput = contentEl.querySelector(`.atb-venta-cant-edit[data-id="${id}"]`);
+        const notaInput = contentEl.querySelector(`.atb-venta-nota-edit[data-id="${id}"]`);
         const precio_venta = Number(precioInput ? precioInput.value : 0);
         const cantidad = Number(cantInput ? cantInput.value : 0);
+        const nota = notaInput ? notaInput.value.trim() : '';
         if (!precio_venta || precio_venta <= 0) {
           alert('Ingresa un precio válido.');
           return;
@@ -1354,11 +1376,30 @@
         const resp = await fetch('/api/compras/ventas/' + id, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ precio_venta, cantidad }),
+          body: JSON.stringify({ precio_venta, cantidad, nota }),
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
           alert(err.error || 'No se pudo actualizar la venta.');
+          return;
+        }
+        renderCompras();
+      });
+    });
+
+    contentEl.querySelectorAll('.atb-venta-nota-guardar').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const notaInput = contentEl.querySelector(`.atb-venta-nota-edit[data-id="${id}"]`);
+        const nota = notaInput ? notaInput.value.trim() : '';
+        const resp = await fetch('/api/compras/ventas/' + id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nota }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          alert(err.error || 'No se pudo actualizar la nota.');
           return;
         }
         renderCompras();
@@ -1429,13 +1470,34 @@
       });
     });
 
+    contentEl.querySelectorAll('.atb-orden-nota-guardar').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const notaInput = contentEl.querySelector(`.atb-orden-nota-edit[data-id="${id}"]`);
+        const nota = notaInput ? notaInput.value.trim() : '';
+        const resp = await fetch('/api/compras/' + id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nota }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          alert(err.error || 'No se pudo actualizar la nota.');
+          return;
+        }
+        renderCompras();
+      });
+    });
+
     contentEl.querySelectorAll('.atb-orden-comprar-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id = btn.dataset.id;
         const cantInput = contentEl.querySelector(`.atb-orden-cant-comprar[data-id="${id}"]`);
         const precioInput = contentEl.querySelector(`.atb-orden-precio-comprar[data-id="${id}"]`);
+        const notaInput = contentEl.querySelector(`.atb-orden-nota-comprar[data-id="${id}"]`);
         const cantidad = Number(cantInput ? cantInput.value : 0);
         const precio_pagado = Number(precioInput ? precioInput.value : 0);
+        const nota = notaInput ? notaInput.value.trim() : '';
         if (!cantidad || cantidad <= 0) {
           alert('Ingresa una cantidad válida.');
           return;
@@ -1448,7 +1510,7 @@
         const resp = await fetch('/api/compras/' + id + '/comprar', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cantidad, precio_pagado, tarifa_pct }),
+          body: JSON.stringify({ cantidad, precio_pagado, tarifa_pct, nota }),
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
@@ -1464,8 +1526,10 @@
         const id = btn.dataset.id;
         const cantInput = contentEl.querySelector(`.atb-ejecucion-cant-edit[data-id="${id}"]`);
         const precioInput = contentEl.querySelector(`.atb-ejecucion-precio-edit[data-id="${id}"]`);
+        const notaInput = contentEl.querySelector(`.atb-ejecucion-nota-edit[data-id="${id}"]`);
         const cantidad = Number(cantInput ? cantInput.value : 0);
         const precio_pagado = Number(precioInput ? precioInput.value : 0);
+        const nota = notaInput ? notaInput.value.trim() : '';
         if (!cantidad || cantidad <= 0 || !precio_pagado || precio_pagado <= 0) {
           alert('Ingresa cantidad y precio válidos.');
           return;
@@ -1473,7 +1537,7 @@
         const resp = await fetch('/api/compras/ejecuciones/' + id, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cantidad, precio_pagado }),
+          body: JSON.stringify({ cantidad, precio_pagado, nota }),
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
@@ -3362,3 +3426,15 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
