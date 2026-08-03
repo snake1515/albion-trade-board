@@ -345,6 +345,7 @@
   const WEAPONS = {{ weapons_json | safe }};
   const MOUNTS = {{ mounts_json | safe }};
   let lastMountData = [];
+  let lastComprasData = [];
   const WEAPON_TIPS = {{ weapon_tips_json | safe }};
   const GATHERING_BIOME = {{ gathering_biome_json | safe }};
   const REFINING_BONUS_CITY = {{ refining_bonus_json | safe }};
@@ -970,6 +971,7 @@
     contentEl.innerHTML = '<div class="atb-empty">Cargando compras...</div>';
     const res = await fetch('/api/compras');
     const compras = await res.json();
+    lastComprasData = compras;
 
     const itemOptions = ITEMS.map(i => `<option value="${i.id}">${i.name}</option>`).join('');
     const cityOptions = '<option value="">Selecciona ciudad</option>' + CITIES.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
@@ -980,13 +982,14 @@
     const vendidas = compras.filter(c => c.vendido);
     const totalInvertido = pendientes.reduce((sum, c) => {
       const pendienteCompra = Number(c.cantidad_pendiente_compra || 0);
-      const costoReal = Number(c.costo_total_comprado || 0) + pendienteCompra * Number(c.precio_oro);
+      const costoReal = Number(c.costo_total_comprado || 0) + Number(c.tarifa_pagada_orden || 0) + pendienteCompra * Number(c.precio_oro);
       // Solo cuenta lo que aún no se ha recuperado vendiendo (confirmado o listado).
       const yaComprometidoVenta = Number(c.cantidad_comprada || 0) > 0
-        ? ((Number(c.cantidad_vendida || 0) + Number(c.cantidad_pendiente_venta || 0)) / Number(c.cantidad_comprada)) * Number(c.costo_total_comprado || 0)
+        ? ((Number(c.cantidad_vendida || 0) + Number(c.cantidad_pendiente_venta || 0)) / Number(c.cantidad_comprada)) * (Number(c.costo_total_comprado || 0) + Number(c.tarifa_pagada_orden || 0))
         : 0;
       return sum + Math.max(0, costoReal - yaComprometidoVenta);
     }, 0);
+
 
     // Agrupa pendientes por ciudad para que sea fácil ver "qué tengo dónde"
     const porCiudad = {};
@@ -1077,7 +1080,8 @@
     function rowCompra(c) {
       const pendienteCompra = Number(c.cantidad_pendiente_compra ?? 0);
       const esOrdenAbierta = pendienteCompra > 0.0001;
-      const costoRealTotal = Number(c.costo_total_comprado || 0) + pendienteCompra * Number(c.precio_oro);
+      const tarifaPagadaOrden = Number(c.tarifa_pagada_orden || 0);
+      const costoRealTotal = Number(c.costo_total_comprado || 0) + tarifaPagadaOrden + pendienteCompra * Number(c.precio_oro);
       const restanteSinListar = Number(c.cantidad_disponible_venta ?? c.cantidad_restante);
       const pendienteVenta = Number(c.cantidad_pendiente_venta || 0);
       const cancelada = c.estado === 'cancelado';
@@ -1115,7 +1119,8 @@
             <input type="number" class="atb-compra-precio-venta" data-id="${c.id}" min="0" placeholder="precio c/u" style="width:90px;">
             <input type="text" class="atb-compra-nota-venta" data-id="${c.id}" placeholder="nota (ej. estas van para Caerleon)" style="width:170px; font-size:11px;">
             <button class="atb-btn atb-compra-vender-btn" style="padding:6px 10px; font-size:11px;" data-id="${c.id}">Registrar venta</button>
-          </div>`;
+          </div>
+          <div class="atb-field-hint atb-venta-preview" data-preview-id="${c.id}" style="margin-top:4px;">Escribe un precio para ver cuánto te cobra el juego de impuesto + tarifa.</div>`;
       // Editar precio/cantidad de la orden — deshabilitado si ya está cerrada o cancelada
       const ordenEditable = !c.vendido && !cancelada;
       const precioCantOrdenCell = ordenEditable
@@ -1136,6 +1141,7 @@
               <input type="text" class="atb-orden-nota-comprar" data-id="${c.id}" placeholder="nota (opcional)" style="width:150px; font-size:11px;">
               <button class="atb-btn atb-orden-comprar-btn" data-id="${c.id}" style="padding:6px 10px; font-size:11px; background:var(--teal); color:#0d1712;">Registrar compra</button>
             </div>
+            <div class="atb-field-hint" style="margin-top:4px;">Esto solo registra que te llenaron unidades — no cobra tarifa aparte, esa ya se cobró al poner/actualizar la orden (arriba, en "Total invertido").</div>
           </div>`
         : '';
       const gananciaAcum = Number(c.ganancia_acumulada || 0);
@@ -1173,7 +1179,11 @@
             <div>
               <label>Total invertido</label>
               <span style="color:#d97a7a; font-weight:600;">-${Math.round(costoRealTotal).toLocaleString('es-CO')}</span>
-              ${esOrdenAbierta ? `<div style="font-size:10px; color:var(--text-muted);">(${Math.round(Number(c.costo_total_comprado || 0)).toLocaleString('es-CO')} ya pagado)</div>` : ''}
+              <div style="font-size:10px; color:var(--text-muted); margin-top:2px; line-height:1.5;">
+                ${Math.round(Number(c.costo_total_comprado || 0)).toLocaleString('es-CO')} pagado en compras
+                ${pendienteCompra > 0 ? `<br>+ ${Math.round(pendienteCompra * Number(c.precio_oro)).toLocaleString('es-CO')} pendiente por comprar` : ''}
+                ${tarifaPagadaOrden > 0 ? `<br>+ ${Math.round(tarifaPagadaOrden).toLocaleString('es-CO')} tarifa de publicación (lo que cobra el juego por poner/actualizar la orden)` : ''}
+              </div>
               ${gananciaTag}
             </div>
             <div>
@@ -1315,12 +1325,42 @@
         return;
       }
 
+      if (!ya_comprado && tarifa_pct > 0) {
+        const tarifaEstimada = precio_oro * cantidad * tarifa_pct / 100;
+        if (!confirm(`El juego va a cobrar ${Math.round(tarifaEstimada).toLocaleString('es-CO')} de tarifa de publicación por poner esta orden (${tarifa_pct}% sobre ${cantidad} uds × ${precio_oro}). ¿Continuar?`)) {
+          return;
+        }
+      }
+
       await fetch('/api/compras', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ item_id, city_compra, city, precio_oro, cantidad, nota, origen, ya_comprado, tarifa_pct }),
       });
       renderCompras();
+    });
+
+    function actualizarPreviewVenta(id) {
+      const precioInput = contentEl.querySelector(`.atb-compra-precio-venta[data-id="${id}"]`);
+      const cantInput = contentEl.querySelector(`.atb-compra-cant-venta[data-id="${id}"]`);
+      const previewEl = contentEl.querySelector(`.atb-venta-preview[data-preview-id="${id}"]`);
+      if (!precioInput || !previewEl) return;
+      const precio_venta = Number(precioInput.value);
+      const cantidad = Number(cantInput ? cantInput.value : 0) || 0;
+      if (!precio_venta || precio_venta <= 0) {
+        previewEl.textContent = 'Escribe un precio para ver cuánto te cobra el juego de impuesto + tarifa.';
+        return;
+      }
+      const tax_pct = Number(document.getElementById('atb-tax').value) || 0;
+      const tarifa_pct = Number(document.getElementById('atb-setupfee').value) || 0;
+      const bruto = precio_venta * cantidad;
+      const montoTax = bruto * tax_pct / 100;
+      const montoTarifa = bruto * tarifa_pct / 100;
+      const neto = bruto - montoTax - montoTarifa;
+      previewEl.innerHTML = `Bruto: ${Math.round(bruto).toLocaleString('es-CO')} · Impuesto (${tax_pct}%): -${Math.round(montoTax).toLocaleString('es-CO')} · Tarifa (${tarifa_pct}%): -${Math.round(montoTarifa).toLocaleString('es-CO')} · <strong style="color:var(--text);">Recibes: ${Math.round(neto).toLocaleString('es-CO')}</strong>`;
+    }
+    contentEl.querySelectorAll('.atb-compra-precio-venta, .atb-compra-cant-venta').forEach(inp => {
+      inp.addEventListener('input', () => actualizarPreviewVenta(inp.dataset.id));
     });
 
     contentEl.querySelectorAll('.atb-compra-vender-btn').forEach(btn => {
@@ -1456,10 +1496,17 @@
           alert('Ingresa un precio válido.');
           return;
         }
+        const tarifa_pct = Number(document.getElementById('atb-setupfee').value) || 0;
+        const compra = lastComprasData.find(c => String(c.id) === String(id));
+        const pendienteActual = compra ? Math.max(0, cantidad - Number(compra.cantidad_comprada || 0)) : cantidad;
+        const tarifaEsteAjuste = precio_oro * pendienteActual * tarifa_pct / 100;
+        if (tarifaEsteAjuste > 0 && !confirm(`El juego va a cobrar ${Math.round(tarifaEsteAjuste).toLocaleString('es-CO')} de tarifa de publicación por actualizar esta orden (${tarifa_pct}% sobre ${pendienteActual} uds × ${precio_oro}). ¿Continuar?`)) {
+          return;
+        }
         const resp = await fetch('/api/compras/' + id, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ precio_oro, cantidad }),
+          body: JSON.stringify({ precio_oro, cantidad, tarifa_pct }),
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
@@ -1506,11 +1553,10 @@
           alert('Ingresa el precio al que se compró.');
           return;
         }
-        const tarifa_pct = Number(document.getElementById('atb-setupfee').value) || 0;
         const resp = await fetch('/api/compras/' + id + '/comprar', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cantidad, precio_pagado, tarifa_pct, nota }),
+          body: JSON.stringify({ cantidad, precio_pagado, nota }),
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
@@ -3172,11 +3218,14 @@
     //   orden (lo que el juego reserva/pediría para completarla)
     const capitalComprometido = comprasCapital.reduce((s, c) => {
       const cantidadComprada = Number(c.cantidad_comprada || 0);
-      const costoRealComprado = Number(c.costo_total_comprado || 0);
+      // Plata que YA salió de tu bolsillo por esta compra: lo pagado en
+      // fills + la tarifa de publicación (esta última se paga aunque no se
+      // haya comprado ni una unidad todavía, por eso NO depende de cantidadComprada).
+      const costoTotalGastado = Number(c.costo_total_comprado || 0) + Number(c.tarifa_pagada_orden || 0);
       const cantidadSinRecuperar = Number(c.cantidad_disponible_venta || 0);
       const costoSinRecuperar = cantidadComprada > 0
-        ? (cantidadSinRecuperar / cantidadComprada) * costoRealComprado
-        : 0;
+        ? (cantidadSinRecuperar / cantidadComprada) * costoTotalGastado
+        : costoTotalGastado;
       const valorOrdenPendiente = Number(c.cantidad_pendiente_compra || 0) * Number(c.precio_oro);
       return s + Math.max(0, costoSinRecuperar) + valorOrdenPendiente;
     }, 0);
@@ -3207,11 +3256,10 @@
     comprasCapital.forEach(c => {
       if (c.ejecuciones && c.ejecuciones.length) {
         c.ejecuciones.forEach(e => {
-          const costoReal = Number(e.cantidad) * Number(e.precio_pagado) * (1 + Number(e.tarifa_pct || 0) / 100);
           eventosAuto.push({
             fecha: e.fecha || c.fecha_creacion,
             tipo: 'compra',
-            monto: -costoReal,
+            monto: -(Number(e.cantidad) * Number(e.precio_pagado)),
             nota: `Compra: ${c.item_name} ×${e.cantidad} en ${c.city}`,
           });
         });
@@ -3223,6 +3271,16 @@
           tipo: 'compra',
           monto: -(Number(c.precio_oro) * Number(c.cantidad)),
           nota: `Compra: ${c.item_name} ×${c.cantidad} en ${c.city}`,
+        });
+      }
+      // La tarifa de publicación de la orden es un cargo aparte (se cobra al
+      // listar/actualizar, no por cada fill) — un solo evento por lo acumulado.
+      if (Number(c.tarifa_pagada_orden || 0) > 0) {
+        eventosAuto.push({
+          fecha: c.fecha_creacion,
+          tipo: 'tarifa',
+          monto: -Number(c.tarifa_pagada_orden),
+          nota: `Tarifa de publicación: ${c.item_name} en ${c.city}`,
         });
       }
       (c.ventas || []).filter(v => v.estado === 'vendida').forEach(v => {
