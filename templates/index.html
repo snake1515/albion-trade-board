@@ -124,11 +124,17 @@
      vista cuando hay varias abiertas al tiempo. */
   .atb-compra-cards { display: flex; flex-direction: column; gap: 14px; }
   .atb-compra-card { background: var(--panel-raised); border: 1px solid var(--hairline); border-left-width: 4px; border-radius: 6px; padding: 14px 16px; }
-  .atb-compra-card-header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--hairline); }
+  .atb-compra-card-header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--hairline); cursor: pointer; user-select: none; }
+  .atb-compra-card.atb-collapsed .atb-compra-card-header { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+  .atb-compra-card.atb-collapsed .atb-compra-card-body { display: none; }
+  .atb-compra-caret { display: inline-block; margin-left: auto; padding-left: 8px; color: var(--text-muted); font-size: 11px; transition: transform 0.15s ease; flex-shrink: 0; }
+  .atb-compra-card.atb-collapsed .atb-compra-caret { transform: rotate(-90deg); }
   .atb-compra-id { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-muted); background: rgba(255,255,255,0.04); border: 1px solid var(--hairline); border-radius: 10px; padding: 2px 9px; }
   .atb-compra-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 6px; }
   .atb-compra-card-grid label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 4px; }
   .atb-compra-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--hairline); }
+  .atb-compras-filtros { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
+  .atb-compras-filtros input, .atb-compras-filtros select { font-size: 12px; padding: 6px 8px; }
 
   /* Bloque de ejecuciones de COMPRA (dinero que sale) — tinte azulado */
   .atb-ejecuciones-block { margin-top: 10px; padding: 10px 12px; background: rgba(76, 145, 212, 0.07); border: 1px solid rgba(76, 145, 212, 0.25); border-radius: 5px; }
@@ -346,6 +352,12 @@
   const MOUNTS = {{ mounts_json | safe }};
   let lastMountData = [];
   let lastComprasData = [];
+  // Tarjetas de "Mis compras": cuáles están desplegadas (por id de orden) y
+  // filtros de búsqueda vigentes — se conservan entre renders de la pestaña
+  // (ej. al registrar una venta) para no perder lo que el usuario ya abrió/buscó.
+  let comprasExpandedIds = new Set();
+  let comprasFiltro = { texto: '', ciudad: '', estado: '' };
+  let comprasFiltroItemTenFoco = false;
   const WEAPON_TIPS = {{ weapon_tips_json | safe }};
   const GATHERING_BIOME = {{ gathering_biome_json | safe }};
   const REFINING_BONUS_CITY = {{ refining_bonus_json | safe }};
@@ -980,6 +992,27 @@
     // listadas sin confirmar). "Vendida" = c.vendido, todo quedó confirmado.
     const pendientes = compras.filter(c => !c.vendido);
     const vendidas = compras.filter(c => c.vendido);
+
+    // Bucket de estado para filtrar: las órdenes abiertas/en ejecución sin
+    // cancelar ni cerrar del todo caen aquí como "pendiente" — antes no
+    // tenían ninguna badge visible que las identificara como tales.
+    function estadoBucket(c) {
+      if (c.vendido) return 'ejecucion_total';
+      if (c.estado === 'cancelado') return 'cancelado';
+      return 'pendiente';
+    }
+    const comprasFiltradas = compras.filter(c => {
+      if (comprasFiltro.estado && estadoBucket(c) !== comprasFiltro.estado) return false;
+      if (comprasFiltro.ciudad && c.city !== comprasFiltro.ciudad && c.city_compra !== comprasFiltro.ciudad) return false;
+      if (comprasFiltro.texto) {
+        const q = comprasFiltro.texto.trim().toLowerCase();
+        if (q && !(c.item_name || '').toLowerCase().includes(q)) return false;
+      }
+      return true;
+    });
+    const pendientesFiltradas = comprasFiltradas.filter(c => !c.vendido);
+    const vendidasFiltradas = comprasFiltradas.filter(c => c.vendido);
+
     const totalInvertido = pendientes.reduce((sum, c) => {
       const pendienteCompra = Number(c.cantidad_pendiente_compra || 0);
       const costoReal = Number(c.costo_total_comprado || 0) + Number(c.tarifa_pagada_orden || 0) + pendienteCompra * Number(c.precio_oro);
@@ -1150,61 +1183,66 @@
         ? `<div style="font-size:10px; margin-top:4px; color:${gananciaAcum >= 0 ? '#7fc9a3' : '#d97a7a'};">${gananciaAcum >= 0 ? '+' : ''}${Math.round(gananciaAcum).toLocaleString('es-CO')} confirmada${pendienteVenta > 0 ? `<br><span style="color:var(--text-muted);">${gananciaPend >= 0 ? '+' : ''}${Math.round(gananciaPend).toLocaleString('es-CO')} estimada (pendiente)</span>` : ''}</div>`
         : '';
       const esRecoleccion = c.origen === 'recoleccion';
-      const badges = `${esRecoleccion ? `<span class="atb-rent-badge" style="font-size:10px; color:var(--teal); border-color:var(--teal); background:rgba(0,0,0,0);">Recolectado — no usa capital</span>` : ''}${cancelada ? `<span class="atb-rent-badge atb-rent-bad" style="font-size:10px;">Cancelada</span>` : ''}${c.vendido ? `<span class="atb-rent-badge atb-rent-ok" style="font-size:10px;">Ejecución total</span>` : ''}`;
+      const estadoPendienteBadge = (!cancelada && !c.vendido) ? `<span class="atb-rent-badge atb-rent-warn" style="font-size:10px;">Pendiente</span>` : '';
+      const badges = `${estadoPendienteBadge}${esRecoleccion ? `<span class="atb-rent-badge" style="font-size:10px; color:var(--teal); border-color:var(--teal); background:rgba(0,0,0,0);">Recolectado — no usa capital</span>` : ''}${cancelada ? `<span class="atb-rent-badge atb-rent-bad" style="font-size:10px;">Cancelada</span>` : ''}${c.vendido ? `<span class="atb-rent-badge atb-rent-ok" style="font-size:10px;">Ejecución total</span>` : ''}`;
       const subfilas = [ejecucionesSubfila(c), ventasSubfila(c)].filter(Boolean).join('');
       const color = colorParaCompra(c);
+      const expandida = comprasExpandedIds.has(c.id);
 
       return `
-        <div class="atb-compra-card" style="border-left-color:${color};">
-          <div class="atb-compra-card-header">
+        <div class="atb-compra-card ${expandida ? '' : 'atb-collapsed'}" data-compra-card="${c.id}" style="border-left-color:${color};">
+          <div class="atb-compra-card-header" data-compra-toggle="${c.id}">
             <span class="atb-compra-id" style="border-color:${color}; color:${color};">Orden #${c.id}</span>
             <span class="atb-item-name">${itemIcon(c.item_id)}${c.item_name}</span>
             <span class="atb-route">${ruta}</span>
             ${badges}
-            <span style="margin-left:auto; display:flex; gap:8px;">
+            <span style="display:flex; gap:8px;" data-no-toggle>
               ${!c.vendido ? `<button class="atb-btn atb-compra-estado-btn" data-id="${c.id}" data-nuevo-estado="${cancelada ? 'en_ejecucion' : 'cancelado'}" style="padding:5px 10px; font-size:11px; background:${cancelada ? 'var(--teal)' : 'var(--panel-raised)'}; color:${cancelada ? '#0d1712' : 'var(--text-muted)'}; border:1px solid var(--hairline);">${cancelada ? 'Reactivar' : 'Cancelar compra'}</button>` : ''}
               <button class="atb-event-del atb-compra-del" data-id="${c.id}">Borrar compra</button>
             </span>
+            <span class="atb-compra-caret">▼</span>
           </div>
 
-          <div class="atb-compra-card-grid">
-            <div>
-              <label>Precio orden / cantidad</label>
-              ${precioCantOrdenCell}
-            </div>
-            <div>
-              <label>Cantidad sin listar</label>
-              ${cantidadCell}
-            </div>
-            <div>
-              <label>Total invertido</label>
-              <span style="color:#d97a7a; font-weight:600;">-${Math.round(costoRealTotal).toLocaleString('es-CO')}</span>
-              <div style="font-size:10px; color:var(--text-muted); margin-top:2px; line-height:1.5;">
-                ${Math.round(Number(c.costo_total_comprado || 0)).toLocaleString('es-CO')} pagado en compras
-                ${pendienteCompra > 0 ? `<br>+ ${Math.round(pendienteCompra * Number(c.precio_oro)).toLocaleString('es-CO')} pendiente por comprar` : ''}
-                ${tarifaPagadaOrden > 0 ? `<br>+ ${Math.round(tarifaPagadaOrden).toLocaleString('es-CO')} tarifa de publicación (lo que cobra el juego por poner/actualizar la orden)` : ''}
+          <div class="atb-compra-card-body">
+            <div class="atb-compra-card-grid">
+              <div>
+                <label>Precio orden / cantidad</label>
+                ${precioCantOrdenCell}
               </div>
-              ${gananciaTag}
+              <div>
+                <label>Cantidad sin listar</label>
+                ${cantidadCell}
+              </div>
+              <div>
+                <label>Total invertido</label>
+                <span style="color:#d97a7a; font-weight:600;">-${Math.round(costoRealTotal).toLocaleString('es-CO')}</span>
+                <div style="font-size:10px; color:var(--text-muted); margin-top:2px; line-height:1.5;">
+                  ${Math.round(Number(c.costo_total_comprado || 0)).toLocaleString('es-CO')} pagado en compras
+                  ${pendienteCompra > 0 ? `<br>+ ${Math.round(pendienteCompra * Number(c.precio_oro)).toLocaleString('es-CO')} pendiente por comprar` : ''}
+                  ${tarifaPagadaOrden > 0 ? `<br>+ ${Math.round(tarifaPagadaOrden).toLocaleString('es-CO')} tarifa de publicación (lo que cobra el juego por poner/actualizar la orden)` : ''}
+                </div>
+                ${gananciaTag}
+              </div>
+              <div>
+                <label>Rentabilidad ahora</label>
+                ${estadoCell}
+              </div>
+              <div>
+                <label>Nota de la orden</label>
+                ${ordenEditable
+                  ? `<div style="display:flex; gap:6px;"><input type="text" class="atb-orden-nota-edit" data-id="${c.id}" value="${(c.nota || '').replace(/"/g, '&quot;')}" placeholder="ej. para vender en Caerleon" style="flex:1; font-size:11px;"><button class="atb-btn atb-orden-nota-guardar" data-id="${c.id}" style="padding:4px 8px; font-size:10px;">Guardar</button></div>`
+                  : `<span style="font-size:11px; color:var(--text-muted);">${c.nota || '—'}</span>`}
+              </div>
             </div>
-            <div>
-              <label>Rentabilidad ahora</label>
-              ${estadoCell}
-            </div>
-            <div>
-              <label>Nota de la orden</label>
-              ${ordenEditable
-                ? `<div style="display:flex; gap:6px;"><input type="text" class="atb-orden-nota-edit" data-id="${c.id}" value="${(c.nota || '').replace(/"/g, '&quot;')}" placeholder="ej. para vender en Caerleon" style="flex:1; font-size:11px;"><button class="atb-btn atb-orden-nota-guardar" data-id="${c.id}" style="padding:4px 8px; font-size:10px;">Guardar</button></div>`
-                : `<span style="font-size:11px; color:var(--text-muted);">${c.nota || '—'}</span>`}
-            </div>
+
+            ${!sinCupoParaVender || comprarForm ? `
+              <div class="atb-compra-card-actions" style="border-top:none; padding-top:0; flex-direction:column; align-items:stretch;">
+                ${!sinCupoParaVender ? `<div><label style="display:block; font-size:9px; color:var(--text-muted); margin-bottom:4px;">Registrar venta parcial</label>${ventaForm}</div>` : ''}
+                ${comprarForm}
+              </div>` : ''}
+
+            ${subfilas}
           </div>
-
-          ${!sinCupoParaVender || comprarForm ? `
-            <div class="atb-compra-card-actions" style="border-top:none; padding-top:0; flex-direction:column; align-items:stretch;">
-              ${!sinCupoParaVender ? `<div><label style="display:block; font-size:9px; color:var(--text-muted); margin-bottom:4px;">Registrar venta parcial</label>${ventaForm}</div>` : ''}
-              ${comprarForm}
-            </div>` : ''}
-
-          ${subfilas}
         </div>`;
     }
 
@@ -1262,10 +1300,25 @@
         ${resumenCiudades}
       </div>
 
+      <div class="atb-compras-filtros">
+        <input type="text" id="atb-compras-filtro-item" placeholder="Buscar por item..." value="${(comprasFiltro.texto || '').replace(/"/g, '&quot;')}" style="min-width:160px;">
+        <select id="atb-compras-filtro-ciudad" style="min-width:150px;">
+          <option value="">Todas las ciudades</option>
+          ${CITIES.map(c => `<option value="${c.id}" ${comprasFiltro.ciudad === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+        </select>
+        <select id="atb-compras-filtro-estado" style="min-width:150px;">
+          <option value="">Todos los estados</option>
+          <option value="pendiente" ${comprasFiltro.estado === 'pendiente' ? 'selected' : ''}>Pendiente</option>
+          <option value="cancelado" ${comprasFiltro.estado === 'cancelado' ? 'selected' : ''}>Cancelada</option>
+          <option value="ejecucion_total" ${comprasFiltro.estado === 'ejecucion_total' ? 'selected' : ''}>Ejecución total</option>
+        </select>
+        ${(comprasFiltro.texto || comprasFiltro.ciudad || comprasFiltro.estado) ? `<button class="atb-btn" id="atb-compras-filtro-limpiar" style="padding:6px 10px; font-size:11px;">Limpiar filtros</button>` : ''}
+      </div>
+
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
-        Pendientes (${pendientes.length}) · <span style="color:#d97a7a; font-weight:600;">-${Math.round(totalInvertido).toLocaleString('es-CO')}</span> plata invertida sin vender${cantVentasPendientes ? ` · ${cantVentasPendientes} venta(s) esperando confirmación` : ''}
+        Pendientes (${pendientesFiltradas.length}${pendientesFiltradas.length !== pendientes.length ? ` de ${pendientes.length}` : ''}) · <span style="color:#d97a7a; font-weight:600;">-${Math.round(totalInvertido).toLocaleString('es-CO')}</span> plata invertida sin vender${cantVentasPendientes ? ` · ${cantVentasPendientes} venta(s) esperando confirmación` : ''}
       </p>
-      <div class="atb-compra-cards">${pendientes.map(c => rowCompra(c)).join('') || '<div class="atb-empty">Sin compras pendientes.</div>'}</div>
+      <div class="atb-compra-cards">${pendientesFiltradas.map(c => rowCompra(c)).join('') || `<div class="atb-empty">${pendientes.length ? 'Ningún resultado con estos filtros.' : 'Sin compras pendientes.'}</div>`}</div>
 
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:22px 0 8px;">Ganancias y pérdidas (solo ventas CONFIRMADAS) — ya con el % de impuesto de mercado descontado</p>
       <div class="atb-summary-grid">
@@ -1281,9 +1334,62 @@
         </div>
       </div>
 
-      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:18px 0 8px;">Ejecución total (${vendidas.length})</p>
-      <div class="atb-compra-cards">${vendidas.map(c => rowCompra(c)).join('') || '<div class="atb-empty">Todavía ninguna vendida por completo.</div>'}</div>
+      <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin:18px 0 8px;">Ejecución total (${vendidasFiltradas.length}${vendidasFiltradas.length !== vendidas.length ? ` de ${vendidas.length}` : ''})</p>
+      <div class="atb-compra-cards">${vendidasFiltradas.map(c => rowCompra(c)).join('') || `<div class="atb-empty">${vendidas.length ? 'Ningún resultado con estos filtros.' : 'Todavía ninguna vendida por completo.'}</div>`}</div>
     `;
+
+    // Tarjetas de órdenes: clic en el header despliega/repliega. Ignora
+    // clics dentro de botones propios del header (cancelar/borrar).
+    contentEl.querySelectorAll('[data-compra-toggle]').forEach(header => {
+      header.addEventListener('click', (e) => {
+        if (e.target.closest('[data-no-toggle]')) return;
+        const id = Number(header.dataset.compraToggle);
+        const card = header.closest('.atb-compra-card');
+        if (comprasExpandedIds.has(id)) {
+          comprasExpandedIds.delete(id);
+          card.classList.add('atb-collapsed');
+        } else {
+          comprasExpandedIds.add(id);
+          card.classList.remove('atb-collapsed');
+        }
+      });
+    });
+
+    const filtroItemInput = document.getElementById('atb-compras-filtro-item');
+    const filtroCiudadSel = document.getElementById('atb-compras-filtro-ciudad');
+    const filtroEstadoSel = document.getElementById('atb-compras-filtro-estado');
+    // El re-render reemplaza el input, así que si el usuario estaba
+    // escribiendo aquí, le devolvemos el foco y el cursor al final.
+    if (comprasFiltroItemTenFoco) {
+      filtroItemInput.focus();
+      const len = filtroItemInput.value.length;
+      filtroItemInput.setSelectionRange(len, len);
+    }
+    let filtroItemTimeout = null;
+    filtroItemInput.addEventListener('focus', () => { comprasFiltroItemTenFoco = true; });
+    filtroItemInput.addEventListener('blur', () => { comprasFiltroItemTenFoco = false; });
+    filtroItemInput.addEventListener('input', () => {
+      clearTimeout(filtroItemTimeout);
+      filtroItemTimeout = setTimeout(() => {
+        comprasFiltro.texto = filtroItemInput.value;
+        renderCompras();
+      }, 300);
+    });
+    filtroCiudadSel.addEventListener('change', () => {
+      comprasFiltro.ciudad = filtroCiudadSel.value;
+      renderCompras();
+    });
+    filtroEstadoSel.addEventListener('change', () => {
+      comprasFiltro.estado = filtroEstadoSel.value;
+      renderCompras();
+    });
+    const btnLimpiarFiltros = document.getElementById('atb-compras-filtro-limpiar');
+    if (btnLimpiarFiltros) {
+      btnLimpiarFiltros.addEventListener('click', () => {
+        comprasFiltro = { texto: '', ciudad: '', estado: '' };
+        renderCompras();
+      });
+    }
 
     const chkRevender = document.getElementById('atb-compra-destino-revender');
     const chkInventario = document.getElementById('atb-compra-destino-inventario');
@@ -3530,3 +3636,4 @@
 </script>
 </body>
 </html>
+
