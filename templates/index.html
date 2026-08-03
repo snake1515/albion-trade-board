@@ -2999,6 +2999,20 @@
     const venta = precios.map(r => r.sell_price_min);
     const compra = precios.map(r => r.buy_price_max);
 
+    // Último valor conocido de cada serie (no siempre es el último elemento
+    // del arreglo — puede haber huecos al final si el dato más reciente vino
+    // nulo). Sirve para mostrar el número real debajo de la gráfica, no solo
+    // el cuadrito de color.
+    const ultimoValor = arr => {
+      for (let i = arr.length - 1; i >= 0; i--) {
+        if (arr[i] != null) return arr[i];
+      }
+      return null;
+    };
+    const ultimaVenta = ultimoValor(venta);
+    const ultimaCompra = ultimoValor(compra);
+    const hayDatosCompra = compra.some(v => v != null);
+
     const volLabels = volumen.map(r => new Date(r.ts).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }));
     const volValues = volumen.map(r => r.item_count);
 
@@ -3086,10 +3100,11 @@
 
       <p class="atb-section-label">Precio de compra y venta en ${(CITIES.find(c => c.id === selectedPreciosHistCity) || {}).name || selectedPreciosHistCity}</p>
       <canvas id="atb-ph-precio-canvas" style="width:100%; height:220px; display:block;"></canvas>
-      <div style="display:flex; gap:16px; font-size:11px; color:var(--text-muted); margin:8px 0 20px;">
-        <span><span style="display:inline-block;width:10px;height:10px;background:var(--gold-bright);border-radius:2px;margin-right:5px;"></span>Precio de venta</span>
-        <span><span style="display:inline-block;width:10px;height:10px;background:var(--teal);border-radius:2px;margin-right:5px;"></span>Precio de compra</span>
+      <div style="display:flex; gap:20px; flex-wrap:wrap; font-size:12px; color:var(--text-muted); margin:8px 0 6px; align-items:center;">
+        <span><span style="display:inline-block;width:10px;height:10px;background:var(--gold-bright);border-radius:2px;margin-right:5px;"></span>Precio de venta: <strong style="color:var(--text);">${ultimaVenta != null ? Math.round(ultimaVenta).toLocaleString('es-CO') : 'sin dato'}</strong></span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:var(--teal);border-radius:2px;margin-right:5px;"></span>Precio de compra: <strong style="color:var(--text);">${ultimaCompra != null ? Math.round(ultimaCompra).toLocaleString('es-CO') : 'sin dato'}</strong></span>
       </div>
+      ${!hayDatosCompra ? `<p class="atb-field-hint" style="margin-bottom:20px;">No hay ningún dato de precio de compra registrado para este item en esta ciudad en el rango elegido — por eso no se ve la línea teal en la gráfica. No es que se haya igualado con la venta; es que nadie ha reportado una orden de compra activa en ese período (pasa seguido con items de poco volumen).</p>` : `<div style="margin-bottom:20px;"></div>`}
 
       <p class="atb-section-label">Volumen de transacciones (unidades compraventidas — no es stock disponible)${volBadgeHtml}</p>
       <p class="atb-field-hint" style="margin-bottom:8px;">Clasificación relativa al resto del catálogo (últimos 7 días), no específica de esta ciudad.</p>
@@ -3457,27 +3472,3 @@
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
