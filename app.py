@@ -1116,33 +1116,46 @@ def api_compras():
         item = ITEMS_BY_ID.get(body["item_id"])
         if not item:
             return jsonify({"error": "item no reconocido"}), 400
+        ya_comprado = body.get("ya_comprado", True)
+        tarifa_pct = body.get("tarifa_pct", 0)
+        precio_oro = body["precio_oro"]
+        cantidad = body.get("cantidad", 1)
+
+        # La tarifa de publicación (2.5% típico) SOLO aplica cuando pones una
+        # ORDEN esperando que alguien la llene — el juego la cobra de una vez,
+        # al momento de crear la orden, sobre el valor total de lo que estás
+        # pidiendo (ver "Editar orden de compra": Total = precio×cantidad +
+        # tarifa). Si es compra instantánea (botón "Comprar"), no hay orden
+        # de por medio, así que no se cobra ninguna tarifa.
+        tarifa_pagada_inicial = round(precio_oro * cantidad * tarifa_pct / 100, 2) if not ya_comprado else 0
+
         nueva = {
             "item_id": item["id"],
             "item_name": item["name"],
             "city_compra": body.get("city_compra") or None,
             "city": body["city"],
-            "precio_oro": body["precio_oro"],
-            "cantidad": body.get("cantidad", 1),
+            "precio_oro": precio_oro,
+            "cantidad": cantidad,
             "nota": body.get("nota") or None,
             "origen": body.get("origen") if body.get("origen") in ("compra", "recoleccion") else "compra",
+            "tarifa_pagada_acumulada": tarifa_pagada_inicial,
         }
         res = supabase.table("compras_manual").insert(nueva).execute()
         compra_id = res.data[0]["id"]
 
         # "ya_comprado" = True (default) es el caso simple: compraste instantáneo,
         # ya tienes las unidades en la mano — se registra de una vez como una
-        # ejecución completa. False = es una ORDEN que se va a ir llenando de a
-        # poco (ej. "puse orden de compra de 100 pociones a 1580") — se crea el
-        # registro sin ninguna ejecución todavía; las vas agregando con
-        # /comprar a medida que el juego confirme fills, y puedes seguir
-        # ajustando "precio_oro" y "cantidad" de la orden mientras tanto sin
-        # perder el precio real al que ya compraste cada parte.
-        if body.get("ya_comprado", True):
+        # ejecución completa, sin tarifa (ver nota arriba). False = es una ORDEN
+        # que se va a ir llenando de a poco (ej. "puse orden de compra de 100
+        # pociones a 1580") — se crea el registro sin ninguna ejecución todavía;
+        # las vas agregando con /comprar a medida que el juego confirme fills,
+        # y puedes seguir ajustando "precio_oro" y "cantidad" de la orden
+        # mientras tanto (cada ajuste cobra tarifa otra vez, igual que en el juego).
+        if ya_comprado:
             supabase.table("compras_ejecuciones").insert({
                 "compra_id": compra_id,
-                "cantidad": nueva["cantidad"],
-                "precio_pagado": nueva["precio_oro"],
-                "tarifa_pct": body.get("tarifa_pct", 0),
+                "cantidad": cantidad,
+                "precio_pagado": precio_oro,
             }).execute()
 
         return jsonify(res.data), 201
@@ -1170,10 +1183,15 @@ def api_compras():
     # - cantidad_comprada = unidades que YA se pagaron de verdad (suma de
     #   ejecuciones). Es lo único que realmente tienes en la mano.
     # - cantidad_pendiente_compra = lo que falta por llenar de la orden.
-    # - precio_promedio_compra = costo real ponderado de lo comprado (puede
-    #   diferir de "precio_oro" si ajustaste el precio a mitad de camino,
-    #   ej. 18 uds a 1580 + el resto a 1583) — es la base real para calcular
-    #   ganancia al vender, no el precio nominal con el que arrancó la orden.
+    # - costo_total_comprado = plata real pagada en fills, SIN tarifa (la
+    #   tarifa es un costo aparte del listado, no de cada fill individual).
+    # - tarifa_pagada_orden = tarifa de publicación YA cobrada por poner/
+    #   actualizar esta orden — plata perdida de tu bolsillo aunque la orden
+    #   nunca llegue a llenarse.
+    # - precio_promedio_compra = (costo_total_comprado + tarifa_pagada_orden)
+    #   ÷ cantidad_comprada — costo real ponderado por unidad, repartiendo la
+    #   tarifa entre lo que sí llegó a comprarse. Es la base real para
+    #   calcular ganancia al vender, no el precio nominal de la orden.
     #
     # Lado VENTA (igual que antes):
     # - cantidad_comprometida = unidades con ALGUNA venta registrada, sea
@@ -1184,19 +1202,17 @@ def api_compras():
     for c in compras:
         ejecuciones = ejecuciones_por_compra.get(c["id"], [])
         cantidad_comprada = sum(float(e["cantidad"]) for e in ejecuciones)
-        # El costo real de cada ejecución incluye la tarifa de publicación
-        # (se cobra por poner/actualizar la orden de compra, igual que
-        # muestra el juego en "Editar orden de compra") — no es un costo
-        # aparte, es plata que de verdad salió de tu bolsillo por esas unidades.
-        costo_total_comprado = sum(
-            float(e["cantidad"]) * float(e["precio_pagado"]) * (1 + float(e.get("tarifa_pct") or 0) / 100)
-            for e in ejecuciones
+        costo_total_comprado = sum(float(e["cantidad"]) * float(e["precio_pagado"]) for e in ejecuciones)
+        tarifa_pagada_orden = float(c.get("tarifa_pagada_acumulada") or 0)
+        precio_promedio_compra = (
+            round((costo_total_comprado + tarifa_pagada_orden) / cantidad_comprada, 4)
+            if cantidad_comprada > 0 else float(c["precio_oro"])
         )
-        precio_promedio_compra = round(costo_total_comprado / cantidad_comprada, 4) if cantidad_comprada > 0 else float(c["precio_oro"])
         c["ejecuciones"] = ejecuciones
         c["cantidad_comprada"] = cantidad_comprada
         c["cantidad_pendiente_compra"] = round(float(c["cantidad"]) - cantidad_comprada, 6)
         c["costo_total_comprado"] = round(costo_total_comprado, 2)
+        c["tarifa_pagada_orden"] = round(tarifa_pagada_orden, 2)
         c["precio_promedio_compra"] = precio_promedio_compra
 
         ventas = ventas_por_compra.get(c["id"], [])
@@ -1226,18 +1242,25 @@ def api_compras_editar(compra_id):
     """Edita la orden de compra en sí: precio_oro (precio VIGENTE para lo que
     falta comprar) y/o cantidad (total deseado), además de ciudad/nota. No
     toca lo que ya se compró — eso queda guardado tal cual en
-    compras_ejecuciones con el precio real que se pagó en su momento."""
+    compras_ejecuciones con el precio real que se pagó en su momento.
+
+    Si cambia precio o cantidad, se cobra tarifa de publicación otra vez
+    sobre lo que queda pendiente por comprar — el juego cobra esa tarifa
+    cada vez que actualizas una orden, no solo al crearla (ver "Editar orden
+    de compra" → "Ajustar cuota")."""
     actual = supabase.table("compras_manual").select("*").eq("id", compra_id).single().execute()
     if not actual.data:
         return jsonify({"error": "no encontrada"}), 404
 
     body = request.get_json(silent=True) or {}
     cambios = {}
+    ejecuciones = supabase.table("compras_ejecuciones").select("cantidad").eq("compra_id", compra_id).execute().data
+    ya_comprada = sum(float(e["cantidad"]) for e in ejecuciones)
+
+    reajusta_orden = "precio_oro" in body or "cantidad" in body
     if "precio_oro" in body:
         cambios["precio_oro"] = body["precio_oro"]
     if "cantidad" in body:
-        ya_comprada = sum(float(e["cantidad"]) for e in
-                           supabase.table("compras_ejecuciones").select("cantidad").eq("compra_id", compra_id).execute().data)
         if float(body["cantidad"]) < ya_comprada - 0.0001:
             return jsonify({"error": f"ya se compraron {ya_comprada} unidades, la cantidad total no puede bajar de eso"}), 400
         cambios["cantidad"] = body["cantidad"]
@@ -1249,6 +1272,14 @@ def api_compras_editar(compra_id):
         cambios["nota"] = body["nota"] or None
     if not cambios:
         return jsonify({"error": "nada que actualizar"}), 400
+
+    if reajusta_orden:
+        tarifa_pct = body.get("tarifa_pct", 0)
+        nuevo_precio = float(cambios.get("precio_oro", actual.data["precio_oro"]))
+        nueva_cantidad_total = float(cambios.get("cantidad", actual.data["cantidad"]))
+        pendiente_nuevo = max(0, nueva_cantidad_total - ya_comprada)
+        tarifa_este_ajuste = round(nuevo_precio * pendiente_nuevo * tarifa_pct / 100, 2)
+        cambios["tarifa_pagada_acumulada"] = round(float(actual.data.get("tarifa_pagada_acumulada") or 0) + tarifa_este_ajuste, 2)
 
     res = supabase.table("compras_manual").update(cambios).eq("id", compra_id).execute()
     return jsonify(res.data)
@@ -1789,3 +1820,4 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
