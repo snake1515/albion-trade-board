@@ -1208,9 +1208,15 @@ def api_compras():
             round((costo_total_comprado + tarifa_pagada_orden) / cantidad_comprada, 4)
             if cantidad_comprada > 0 else float(c["precio_oro"])
         )
+        # Si la orden está cancelada, la parte que NUNCA se llenó ya no es
+        # "pendiente" — al cancelar en el juego esa plata (solo el valor de
+        # los items, NO la tarifa de publicación, esa no se devuelve) vuelve
+        # a tu bolsillo. Por eso el "objetivo" de la orden se reduce a lo que
+        # sí alcanzó a comprarse antes de cancelar.
+        cantidad_objetivo = cantidad_comprada if c.get("estado") == "cancelado" else float(c["cantidad"])
         c["ejecuciones"] = ejecuciones
         c["cantidad_comprada"] = cantidad_comprada
-        c["cantidad_pendiente_compra"] = round(float(c["cantidad"]) - cantidad_comprada, 6)
+        c["cantidad_pendiente_compra"] = round(cantidad_objetivo - cantidad_comprada, 6)
         c["costo_total_comprado"] = round(costo_total_comprado, 2)
         c["tarifa_pagada_orden"] = round(tarifa_pagada_orden, 2)
         c["precio_promedio_compra"] = precio_promedio_compra
@@ -1219,13 +1225,20 @@ def api_compras():
         confirmadas = [v for v in ventas if v.get("estado") == "vendida"]
         pendientes_v = [v for v in ventas if v.get("estado") != "vendida"]
         cantidad_comprometida = sum(float(v["cantidad"]) for v in ventas)
+        cantidad_movida_inventario = float(c.get("cantidad_movida_inventario") or 0)
         c["ventas"] = ventas
         c["cantidad_vendida"] = sum(float(v["cantidad"]) for v in confirmadas)
         c["cantidad_pendiente_venta"] = sum(float(v["cantidad"]) for v in pendientes_v)
-        c["cantidad_restante"] = round(float(c["cantidad"]) - cantidad_comprometida, 6)
-        # "disponible_para_vender" limita a lo que REALMENTE ya está comprado —
-        # no puedes listar para venta lo que la orden de compra aún no ha llenado.
-        c["cantidad_disponible_venta"] = round(cantidad_comprada - cantidad_comprometida, 6)
+        c["cantidad_movida_inventario"] = cantidad_movida_inventario
+        # "restante" cuenta como "ya gestionado" tanto lo vendido/listado como
+        # lo movido a inventario — un item que pasó a inventario ya no está
+        # "pendiente", solo cambió de lugar. Usa cantidad_objetivo (no la
+        # nominal) para que una orden cancelada sin nada comprado cierre sola.
+        c["cantidad_restante"] = round(cantidad_objetivo - cantidad_comprometida - cantidad_movida_inventario, 6)
+        # "disponible_para_vender" limita a lo que REALMENTE ya está comprado
+        # y no se ha movido a inventario — no puedes listar para venta lo que
+        # la orden de compra aún no ha llenado, ni lo que ya mandaste al banco.
+        c["cantidad_disponible_venta"] = round(cantidad_comprada - cantidad_comprometida - cantidad_movida_inventario, 6)
         c["ganancia_acumulada"] = round(sum(_ganancia_venta(v, precio_promedio_compra) for v in confirmadas), 2)
         c["ganancia_pendiente_estimada"] = round(sum(_ganancia_venta(v, precio_promedio_compra) for v in pendientes_v), 2)
         c["vendido"] = (
@@ -1506,6 +1519,54 @@ def api_compras_delete(compra_id):
     return jsonify({"deleted": True})
 
 
+@app.route("/api/compras/<int:compra_id>/mover-inventario", methods=["POST"])
+def api_compras_mover_inventario(compra_id):
+    """Mueve unidades YA COMPRADAS (y sin comprometer en una venta) de esta
+    orden hacia el inventario de banco (pestaña 'Inventario'), en vez de
+    dejarlas listadas para vender aquí. Usa el mismo costo real ponderado
+    (precio_promedio_compra, con tarifa incluida) que usa el resto del
+    tablero, y se fusiona con lo que ya haya en esa ciudad promediando el
+    precio — no crea una fila nueva suelta cada vez."""
+    compra = supabase.table("compras_manual").select("*").eq("id", compra_id).single().execute()
+    if not compra.data:
+        return jsonify({"error": "no encontrada"}), 404
+
+    body = request.get_json(silent=True) or {}
+    ciudad_banco = body.get("ciudad_banco") or compra.data["city"]
+
+    ejecuciones = supabase.table("compras_ejecuciones").select("cantidad, precio_pagado").eq("compra_id", compra_id).execute().data
+    cantidad_comprada = sum(float(e["cantidad"]) for e in ejecuciones)
+    costo_total_comprado = sum(float(e["cantidad"]) * float(e["precio_pagado"]) for e in ejecuciones)
+    tarifa_pagada_orden = float(compra.data.get("tarifa_pagada_acumulada") or 0)
+    precio_promedio_compra = (
+        (costo_total_comprado + tarifa_pagada_orden) / cantidad_comprada
+        if cantidad_comprada > 0 else float(compra.data["precio_oro"])
+    )
+
+    ventas = supabase.table("compras_ventas").select("cantidad").eq("compra_id", compra_id).execute().data
+    cantidad_comprometida_venta = sum(float(v["cantidad"]) for v in ventas)
+    ya_movida = float(compra.data.get("cantidad_movida_inventario") or 0)
+    disponible = round(cantidad_comprada - cantidad_comprometida_venta - ya_movida, 6)
+
+    cantidad = float(body.get("cantidad") or disponible)
+    if cantidad <= 0:
+        return jsonify({"error": "no queda cantidad disponible para mover a inventario"}), 400
+    if cantidad - disponible > 0.0001:
+        return jsonify({"error": f"solo hay {disponible} unidades disponibles para mover, no se pueden mover {cantidad}"}), 400
+
+    fila_inventario = _agregar_a_inventario(
+        compra.data["item_id"], compra.data["item_name"], ciudad_banco,
+        cantidad, precio_promedio_compra,
+        nota=f"Desde orden #{compra_id}",
+    )
+
+    supabase.table("compras_manual").update({
+        "cantidad_movida_inventario": round(ya_movida + cantidad, 6),
+    }).eq("id", compra_id).execute()
+
+    return jsonify({"movido": cantidad, "precio_promedio_usado": round(precio_promedio_compra, 2), "inventario": fila_inventario}), 201
+
+
 @app.route("/api/compras/<int:compra_id>/estado", methods=["POST"])
 def api_compras_estado(compra_id):
     """Cancelar una compra (o reactivarla) sin borrar nada — las ventas
@@ -1552,6 +1613,48 @@ def api_capital_delete(mov_id):
     return jsonify({"deleted": True})
 
 
+def _agregar_a_inventario(item_id, item_name, ciudad_banco, cantidad, precio_unitario, nota=None):
+    """Suma unidades al inventario de banco. Si ya había una fila para el
+    mismo item en la misma ciudad, la fusiona recalculando el precio
+    promedio ponderado entre lo que ya había y lo nuevo — en vez de crear
+    una fila duplicada con su propio precio suelto."""
+    cantidad = float(cantidad)
+    precio_unitario = float(precio_unitario)
+    existente = (
+        supabase.table("inventario")
+        .select("*")
+        .eq("item_id", item_id)
+        .eq("ciudad_banco", ciudad_banco)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if existente:
+        fila = existente[0]
+        cantidad_previa = float(fila["cantidad"])
+        precio_previo = float(fila["precio_compra"])
+        cantidad_nueva = cantidad_previa + cantidad
+        precio_promedio = round(
+            (cantidad_previa * precio_previo + cantidad * precio_unitario) / cantidad_nueva, 4
+        ) if cantidad_nueva > 0 else precio_unitario
+        cambios = {"cantidad": cantidad_nueva, "precio_compra": precio_promedio}
+        if nota:
+            nota_previa = fila.get("nota") or ""
+            cambios["nota"] = (nota_previa + " · " + nota).strip(" ·") if nota_previa else nota
+        res = supabase.table("inventario").update(cambios).eq("id", fila["id"]).execute()
+        return res.data[0] if res.data else None
+    nuevo = {
+        "item_id": item_id,
+        "item_name": item_name,
+        "ciudad_banco": ciudad_banco,
+        "cantidad": cantidad,
+        "precio_compra": precio_unitario,
+        "nota": nota or None,
+    }
+    res = supabase.table("inventario").insert(nuevo).execute()
+    return res.data[0] if res.data else None
+
+
 @app.route("/api/inventario", methods=["GET", "POST"])
 def api_inventario():
     if request.method == "POST":
@@ -1561,16 +1664,11 @@ def api_inventario():
             return jsonify({"error": "item no reconocido"}), 400
         if not body.get("ciudad_banco"):
             return jsonify({"error": "ciudad_banco requerida"}), 400
-        nuevo = {
-            "item_id": item["id"],
-            "item_name": item["name"],
-            "ciudad_banco": body["ciudad_banco"],
-            "cantidad": body.get("cantidad", 1),
-            "precio_compra": body["precio_compra"],
-            "nota": body.get("nota") or None,
-        }
-        res = supabase.table("inventario").insert(nuevo).execute()
-        return jsonify(res.data), 201
+        fila = _agregar_a_inventario(
+            item["id"], item["name"], body["ciudad_banco"],
+            body.get("cantidad", 1), body["precio_compra"], body.get("nota"),
+        )
+        return jsonify(fila), 201
 
     filas = (supabase.table("inventario").select("*")
              .order("fecha_creacion", desc=True).execute().data or [])
@@ -1820,4 +1918,6 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
 
