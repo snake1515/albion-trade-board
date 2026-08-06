@@ -974,9 +974,17 @@
 
   async function renderCompras() {
     contentEl.innerHTML = '<div class="atb-empty">Cargando compras...</div>';
-    const res = await fetch('/api/compras');
-    const data = await res.json();
-    lastComprasData = data;
+    try {
+      const res = await fetch('/api/compras');
+      if (!res.ok) throw new Error(`/api/compras respondió ${res.status} — revisa que las tablas "compras_manual", "compras_ejecuciones" y "compras_ventas" existan en Supabase (corre el schema.sql).`);
+      lastComprasData = await res.json();
+    } catch (err) {
+      contentEl.innerHTML = `<div class="atb-empty" style="color:#d97a7a; text-align:left; padding:20px;">
+        <strong>No se pudo cargar "Mis compras".</strong><br><br>${err.message}<br><br>
+        Revisa los logs de Render (pestaña "Logs" de tu servicio) para ver el error exacto si el problema sigue.
+      </div>`;
+      return;
+    }
     renderComprasBody();
   }
 
@@ -3353,10 +3361,24 @@
 
   async function renderInversion() {
     contentEl.innerHTML = '<div class="atb-empty">Cargando capital de inversión...</div>';
-    const [capitalRes, comprasRes, sesionesRes] = await Promise.all([fetch('/api/capital'), fetch('/api/compras'), fetch('/api/sesiones-recoleccion')]);
-    const movimientos = await capitalRes.json();
-    const compras = await comprasRes.json();
-    const sesionesRecoleccion = await sesionesRes.json();
+    let movimientos, compras, sesionesRecoleccion;
+    try {
+      const [capitalRes, comprasRes, sesionesRes] = await Promise.all([fetch('/api/capital'), fetch('/api/compras'), fetch('/api/sesiones-recoleccion')]);
+      if (!capitalRes.ok) throw new Error(`/api/capital respondió ${capitalRes.status} — probablemente falta la tabla "capital_movimientos" en Supabase.`);
+      if (!comprasRes.ok) throw new Error(`/api/compras respondió ${comprasRes.status} — revisa las tablas "compras_manual"/"compras_ejecuciones"/"compras_ventas" en Supabase.`);
+      if (!sesionesRes.ok) throw new Error(`/api/sesiones-recoleccion respondió ${sesionesRes.status} — probablemente falta la tabla "sesiones_recoleccion" o "registro_recoleccion" en Supabase.`);
+      movimientos = await capitalRes.json();
+      compras = await comprasRes.json();
+      sesionesRecoleccion = await sesionesRes.json();
+    } catch (err) {
+      contentEl.innerHTML = `<div class="atb-empty" style="color:#d97a7a; text-align:left; padding:20px;">
+        <strong>No se pudo cargar la pestaña Inversión.</strong><br><br>
+        ${err.message}<br><br>
+        Esto casi siempre pasa cuando el <code>schema.sql</code> no se ha corrido en Supabase (le falta alguna tabla al backend actual). Corre el <code>schema.sql</code> completo en el SQL Editor de Supabase — es seguro, usa "if not exists" en todo.<br><br>
+        Si ya lo corriste, revisa los logs de Render (pestaña "Logs" de tu servicio) para ver el error exacto del backend.
+      </div>`;
+      return;
+    }
 
     // Solo cuenta lo que de verdad usó tu capital de inversión: compras
     // activas (no canceladas) con origen "compra". Lo recolectado (origen
@@ -3478,10 +3500,11 @@
       retiro: { label: 'Retiro', cls: 'atb-rent-bad' },
       compra: { label: 'Compra', cls: 'atb-rent-bad' },
       venta: { label: 'Venta', cls: 'atb-rent-ok' },
+      tarifa: { label: 'Tarifa perdida', cls: 'atb-rent-bad' },
     };
     const movRows = timeline.map(m => {
       const fecha = m.fecha ? new Date(m.fecha).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
-      const info = tipoInfo[m.tipo];
+      const info = tipoInfo[m.tipo] || { label: m.tipo || 'Movimiento', cls: 'atb-rent-warn' };
       const positivo = m.monto >= 0;
       const borrarBtn = m.id
         ? `<button class="atb-event-del atb-capital-del" data-id="${m.id}">Borrar</button>`
@@ -3703,5 +3726,6 @@
 </script>
 </body>
 </html>
+
 
 
