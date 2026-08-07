@@ -692,40 +692,39 @@ def fetch_and_store_prices():
         if not buy_raw and not prev.get("buy_price_max"):
             pendientes_buy_items.add(item_id)
 
-    # Consultas agrupadas por item_id (no por cada par item+ciudad, para
-    # evitar N+1 round-trips a Supabase que provocaban WORKER TIMEOUT en
-    # Render). Filtramos ya los None en la propia query, así el límite no
-    # se desperdicia en filas vacías de otros ítems/ciudades como antes.
-    # ultimo_valido_hist guarda solo la fila MÁS reciente con precio real
-    # por cada (item_id, city), ya que venimos ordenados por ts desc.
+    # Consultas agrupadas por item_id INDIVIDUAL (no todas juntas en una sola
+    # query con limit compartido -> eso diluía items con pocos datos válidos
+    # detrás de items con muchos; tampoco por cada par item+ciudad -> eso
+    # causaba WORKER TIMEOUT por demasiados round-trips). Un límite chico
+    # por item alcanza para cubrir el último precio válido de cada ciudad.
     ultimo_valido_hist = {}  # (item_id, city, "sell"|"buy") -> valor
-    if pendientes_sell_items:
+    for item_id in pendientes_sell_items:
         hist_res = (
             supabase.table("precios_historico")
-            .select("item_id,city,sell_price_min,ts")
-            .in_("item_id", list(pendientes_sell_items))
+            .select("city,sell_price_min,ts")
+            .eq("item_id", item_id)
             .not_.is_("sell_price_min", "null")
             .order("ts", desc=True)
-            .limit(5000)
+            .limit(50)
             .execute()
         )
         for h in (hist_res.data or []):
-            key = ("sell", h["item_id"], h["city"])
+            key = ("sell", item_id, h["city"])
             if key not in ultimo_valido_hist:
                 ultimo_valido_hist[key] = h["sell_price_min"]
 
-    if pendientes_buy_items:
+    for item_id in pendientes_buy_items:
         hist_res = (
             supabase.table("precios_historico")
-            .select("item_id,city,buy_price_max,ts")
-            .in_("item_id", list(pendientes_buy_items))
+            .select("city,buy_price_max,ts")
+            .eq("item_id", item_id)
             .not_.is_("buy_price_max", "null")
             .order("ts", desc=True)
-            .limit(5000)
+            .limit(50)
             .execute()
         )
         for h in (hist_res.data or []):
-            key = ("buy", h["item_id"], h["city"])
+            key = ("buy", item_id, h["city"])
             if key not in ultimo_valido_hist:
                 ultimo_valido_hist[key] = h["buy_price_max"]
 
@@ -2175,6 +2174,8 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
 
 
 
