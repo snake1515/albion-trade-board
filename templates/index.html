@@ -2095,6 +2095,7 @@
   }
 
   let promedioItemBusqueda = '';
+  let promedioItemSeleccionado = null; // id del item con click activo, o null
 
   function renderPromedioItem() {
     // Usa lastRawData, que ya está cargado desde /api/precios al abrir el
@@ -2109,7 +2110,9 @@
     const busqueda = promedioItemBusqueda.trim().toLowerCase();
     const itemsAMostrar = ITEMS
       .filter(i => !busqueda || i.name.toLowerCase().includes(busqueda))
-      .filter(i => porItem[i.id]); // solo items con al menos un precio guardado
+      .filter(i => porItem[i.id]) // solo items con al menos un precio guardado
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name, 'es')); // orden alfabético
 
     // Encuentra el mín/máx dentro de un arreglo de {city, precio}, ignorando
     // nulos — se usa por separado para venta y para compra en cada fila.
@@ -2153,24 +2156,68 @@
         return `<td style="text-align:center; font-size:11px; line-height:1.5; padding:6px 8px;">${fmtVenta}${fmtCompra}</td>`;
       }).join('');
 
-      return `<tr><td class="atb-item-name">${itemIcon(item.id)}${item.name}</td>${celdas}</tr>`;
+      const esSeleccionado = item.id === promedioItemSeleccionado;
+      return `<tr class="atb-promedio-row" data-item-id="${item.id}" style="cursor:pointer; ${esSeleccionado ? 'background:var(--panel-raised);' : ''}"><td class="atb-item-name">${itemIcon(item.id)}${item.name}</td>${celdas}</tr>`;
     }).join('');
 
     const headerCiudades = CITIES.map(c => `<th style="text-align:center;">${c.name}</th>`).join('');
 
+    // --- Panel de "mejor precio" para el item seleccionado con click ---
+    let panelSeleccionHtml = '';
+    if (promedioItemSeleccionado && porItem[promedioItemSeleccionado]) {
+      const itemSel = ITEMS.find(i => i.id === promedioItemSeleccionado);
+      const registros = CITIES.map(city => {
+        const rec = porItem[promedioItemSeleccionado][city.id];
+        return { city, venta: rec ? rec.sell_price_min : null, compra: rec ? rec.buy_price_max : null };
+      });
+
+      // Mejor venta = la más barata (mínimo) entre ciudades con dato.
+      const conVenta = registros.filter(r => r.venta != null);
+      const mejorVenta = conVenta.length
+        ? conVenta.reduce((a, b) => (b.venta < a.venta ? b : a))
+        : null;
+
+      // Mejor compra = la que más paga (máximo) entre ciudades con dato.
+      const conCompra = registros.filter(r => r.compra != null);
+      const mejorCompra = conCompra.length
+        ? conCompra.reduce((a, b) => (b.compra > a.compra ? b : a))
+        : null;
+
+      panelSeleccionHtml = `
+        <div class="atb-panel" style="display:flex; align-items:center; gap:24px; flex-wrap:wrap; margin-bottom:16px; padding:12px 16px;">
+          <div style="display:flex; align-items:center; gap:8px; font-weight:700;">
+            ${itemIcon(itemSel.id, 32)}${itemSel.name}
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px;">Mejor precio de venta</div>
+            <div style="font-size:18px; font-weight:700; color:#7fc9a3;">${mejorVenta ? Math.round(mejorVenta.venta).toLocaleString('es-CO') : '—'}</div>
+            <div style="font-size:11px; color:var(--text-muted);">${mejorVenta ? mejorVenta.city.name : 'sin dato'}</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px;">Mejor precio de compra</div>
+            <div style="font-size:18px; font-weight:700; color:var(--teal);">${mejorCompra ? Math.round(mejorCompra.compra).toLocaleString('es-CO') : '—'}</div>
+            <div style="font-size:11px; color:var(--text-muted);">${mejorCompra ? mejorCompra.city.name : 'sin dato'}</div>
+          </div>
+        </div>
+      `;
+    }
+
     contentEl.innerHTML = `
       <div class="atb-tip">
         <strong>Tip:</strong> por cada ciudad se muestra <strong>V</strong> (precio de venta / ask — lo que pagarías por comprar ahí) y <strong>C</strong> (precio de compra / bid — lo que te pagarían por vender ahí).
-        🔽🔼 marca la mejor y la peor ciudad de cada fila — para venta, "mejor" es la más barata (verde); para compra, "mejor" es la que más paga (verde).
+        🔽🔼 marca la mejor y la peor ciudad de cada fila — para venta, "mejor" es la más barata (verde); para compra, "mejor" es la que más paga (verde). Dale click a un item para ver su mejor precio arriba.
       </div>
 
-      <div class="atb-field" style="max-width:340px; margin-bottom:16px;">
-        <label for="atb-promedio-buscar">Buscar item</label>
-        <input type="text" id="atb-promedio-buscar" placeholder="ej. Poción de curación..." value="${promedioItemBusqueda.replace(/"/g, '&quot;')}">
+      <div style="display:flex; align-items:flex-start; gap:20px; flex-wrap:wrap; margin-bottom:16px;">
+        <div class="atb-field" style="max-width:340px; margin-bottom:0;">
+          <label for="atb-promedio-buscar">Buscar item</label>
+          <input type="text" id="atb-promedio-buscar" placeholder="ej. Poción de curación..." value="${promedioItemBusqueda.replace(/"/g, '&quot;')}">
+        </div>
+        ${panelSeleccionHtml}
       </div>
 
       <p style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
-        ${itemsAMostrar.length} item(s) con precio guardado
+        ${itemsAMostrar.length} item(s) con precio guardado — orden alfabético
       </p>
       <div style="overflow-x:auto;">
         <table class="atb-table"><thead><tr><th>Item</th>${headerCiudades}</tr></thead>
@@ -2187,6 +2234,14 @@
         nuevoInput.focus();
         nuevoInput.setSelectionRange(cursorPos, cursorPos);
       }
+    });
+
+    document.querySelectorAll('.atb-promedio-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const id = row.getAttribute('data-item-id');
+        promedioItemSeleccionado = (promedioItemSeleccionado === id) ? null : id;
+        renderPromedioItem();
+      });
     });
   }
 
@@ -3753,6 +3808,8 @@
 </script>
 </body>
 </html>
+
+
 
 
 
