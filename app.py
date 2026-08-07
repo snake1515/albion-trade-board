@@ -672,22 +672,63 @@ def fetch_and_store_prices():
         (e["item_id"], e["city"]): e for e in (existentes_res.data or [])
     }
 
-    rows = []
-    historico_rows = []
+    rows_raw = []  # (item_id, city, sell_raw, buy_raw, rec) para procesar en dos pasadas
     for rec in data:
         item_id = rec["item_id"]
         city = _normalizar_ciudad_api(rec["city"])
-        prev = existentes.get((item_id, city), {})
-
-        # Valor "crudo" tal como llega de AODP (0 se guarda como 0, no como None)
         sell_raw = rec.get("sell_price_min") or 0
         buy_raw = rec.get("buy_price_max") or 0
+        rows_raw.append((item_id, city, sell_raw, buy_raw, rec))
 
-        # Para precios_actuales: si el nuevo valor es 0, conservamos el último
-        # precio válido en vez de sobreescribirlo con None.
-        sell_actual = sell_raw if sell_raw else prev.get("sell_price_min")
+    # Para los pares (item, ciudad) que YA estaban en None en precios_actuales
+    # (o sea, ni el fallback anterior tenía nada), buscamos el último valor
+    # válido alguna vez registrado en precios_historico, que nunca se pisa.
+    pendientes_sell = set()
+    pendientes_buy = set()
+    for item_id, city, sell_raw, buy_raw, _ in rows_raw:
+        prev = existentes.get((item_id, city), {})
+        if not sell_raw and not prev.get("sell_price_min"):
+            pendientes_sell.add(item_id)
+        if not buy_raw and not prev.get("buy_price_max"):
+            pendientes_buy.add(item_id)
+
+    ultimo_valido_hist = {}  # (item_id, city, "sell"|"buy") -> valor
+    items_pendientes = pendientes_sell | pendientes_buy
+    if items_pendientes:
+        hist_res = (
+            supabase.table("precios_historico")
+            .select("item_id,city,sell_price_min,buy_price_max,ts")
+            .in_("item_id", list(items_pendientes))
+            .order("ts", desc=True)
+            .limit(20000)
+            .execute()
+        )
+        for h in (hist_res.data or []):
+            key_base = (h["item_id"], h["city"])
+            if h.get("sell_price_min") and ("sell", *key_base) not in ultimo_valido_hist:
+                ultimo_valido_hist[("sell", *key_base)] = h["sell_price_min"]
+            if h.get("buy_price_max") and ("buy", *key_base) not in ultimo_valido_hist:
+                ultimo_valido_hist[("buy", *key_base)] = h["buy_price_max"]
+
+    rows = []
+    historico_rows = []
+    for item_id, city, sell_raw, buy_raw, rec in rows_raw:
+        prev = existentes.get((item_id, city), {})
+
+        # Cascada de fallback: valor nuevo de AODP -> último guardado en
+        # precios_actuales -> último valor válido alguna vez visto en
+        # precios_historico. Solo se queda en None si nunca hubo dato real.
+        sell_actual = (
+            sell_raw
+            or prev.get("sell_price_min")
+            or ultimo_valido_hist.get(("sell", item_id, city))
+        )
         sell_date_actual = rec.get("sell_price_min_date") if sell_raw else prev.get("sell_price_min_date")
-        buy_actual = buy_raw if buy_raw else prev.get("buy_price_max")
+        buy_actual = (
+            buy_raw
+            or prev.get("buy_price_max")
+            or ultimo_valido_hist.get(("buy", item_id, city))
+        )
         buy_date_actual = rec.get("buy_price_max_date") if buy_raw else prev.get("buy_price_max_date")
 
         rows.append({
@@ -2115,4 +2156,5 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
 
