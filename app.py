@@ -137,6 +137,25 @@ CITIES = [
     {"id": "Brecilien", "name": "Brécilien"},
 ]
 
+# La API de Albion Data Project espera el nombre EXACTO que usa el juego para
+# cada ciudad como parámetro "locations" — para la mayoría coincide con
+# nuestro id interno, pero "Fort Sterling" lleva espacio en la API aunque acá
+# lo manejamos sin espacio ("FortSterling") en toda la base de datos, config,
+# distancias, etc. Si se manda "FortSterling" pegado, la API simplemente no
+# encuentra esa ciudad y esos precios quedan vacíos — eso es lo que estaba
+# pasando. Este mapeo traduce solo al armar la URL de la API; puertas para
+# adentro (Supabase, frontend) todo sigue usando "FortSterling" como siempre.
+CITY_API_NAME = {c["id"]: c["id"] for c in CITIES}
+CITY_API_NAME["FortSterling"] = "Fort Sterling"
+CITY_FROM_API_NAME = {v: k for k, v in CITY_API_NAME.items()}
+
+
+def _normalizar_ciudad_api(nombre_api):
+    """Convierte el nombre de ciudad que devuelve la API (ej. 'Fort Sterling')
+    de vuelta a nuestro id interno (ej. 'FortSterling') para guardarlo
+    consistente con el resto de la base de datos."""
+    return CITY_FROM_API_NAME.get(nombre_api, nombre_api)
+
 SERVER_HOSTS = {
     "west": "west.albion-online-data.com",
     "europe": "europe.albion-online-data.com",
@@ -486,7 +505,7 @@ def fetch_and_store_prices():
     host = SERVER_HOSTS.get(server, SERVER_HOSTS["west"])
 
     item_ids = ",".join(i["id"] for i in ITEMS)
-    city_names = ",".join(c["id"] for c in CITIES)
+    city_names = ",".join(CITY_API_NAME[c["id"]] for c in CITIES)
     url = f"https://{host}/api/v2/stats/prices/{item_ids}.json?locations={city_names}&qualities=1"
 
     try:
@@ -501,7 +520,7 @@ def fetch_and_store_prices():
     for rec in data:
         rows.append({
             "item_id": rec["item_id"],
-            "city": rec["city"],
+            "city": _normalizar_ciudad_api(rec["city"]),
             "sell_price_min": rec.get("sell_price_min") or None,
             "sell_price_min_date": rec.get("sell_price_min_date") or None,
             "buy_price_max": rec.get("buy_price_max") or None,
@@ -542,7 +561,7 @@ def fetch_and_store_volume(host):
     el mismo dato repetido). El upsert de abajo evita duplicar un punto que
     ya teníamos guardado."""
     item_ids = ",".join(i["id"] for i in ITEMS)
-    city_names = ",".join(c["id"] for c in CITIES)
+    city_names = ",".join(CITY_API_NAME[c["id"]] for c in CITIES)
     url = (f"https://{host}/api/v2/stats/history/{item_ids}.json"
            f"?locations={city_names}&time-scale=1")
 
@@ -557,7 +576,7 @@ def fetch_and_store_volume(host):
     rows = []
     for rec in data:
         item_id = rec.get("item_id")
-        city = rec.get("location")
+        city = _normalizar_ciudad_api(rec.get("location"))
         puntos = rec.get("data") or []
         if not item_id or not city or not puntos:
             continue
@@ -594,7 +613,7 @@ def fetch_and_store_mount_prices(host):
     """Trae precios de las monturas de transporte (Buey, Mamut, Ciervo Gigante, Alce, Caballo).
     Se corre junto al fetch principal (mismo cron cada hora / mismo botón manual)."""
     item_ids = ",".join(m["id"] for m in MOUNTS)
-    city_names = ",".join(c["id"] for c in CITIES)
+    city_names = ",".join(CITY_API_NAME[c["id"]] for c in CITIES)
     url = f"https://{host}/api/v2/stats/prices/{item_ids}.json?locations={city_names}&qualities=1"
 
     try:
@@ -609,7 +628,7 @@ def fetch_and_store_mount_prices(host):
     for rec in data:
         rows.append({
             "item_id": rec["item_id"],
-            "city": rec["city"],
+            "city": _normalizar_ciudad_api(rec["city"]),
             "sell_price_min": rec.get("sell_price_min") or None,
             "sell_price_min_date": rec.get("sell_price_min_date") or None,
             "fetched_at": datetime.now(timezone.utc).isoformat(),
@@ -1841,7 +1860,7 @@ def api_precio_vivo(item_id):
         return jsonify({"error": "item no reconocido"}), 404
     cfg = get_config()
     host = SERVER_HOSTS.get(cfg.get("servidor", "west"), SERVER_HOSTS["west"])
-    city_names = ",".join(c["id"] for c in CITIES)
+    city_names = ",".join(CITY_API_NAME[c["id"]] for c in CITIES)
     url = f"https://{host}/api/v2/stats/prices/{item_id}.json?locations={city_names}&qualities=1"
     try:
         res = requests.get(url, timeout=15)
@@ -1849,6 +1868,9 @@ def api_precio_vivo(item_id):
         data = res.json()
     except Exception as e:
         return jsonify({"error": f"No se pudo consultar el precio en vivo: {e}"}), 502
+    for rec in data:
+        if "city" in rec:
+            rec["city"] = _normalizar_ciudad_api(rec["city"])
     return jsonify({"consultado_en": datetime.now(timezone.utc).isoformat(), "precios": data})
 
 
@@ -1918,6 +1940,7 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
 
 
 
