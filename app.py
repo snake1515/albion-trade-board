@@ -692,23 +692,47 @@ def fetch_and_store_prices():
         if not buy_raw and not prev.get("buy_price_max"):
             pendientes_buy.add(item_id)
 
+    # Pares (item_id, city) que de verdad necesitan fallback histórico
+    pares_sell_pendientes = set()
+    pares_buy_pendientes = set()
+    for item_id, city, sell_raw, buy_raw, _ in rows_raw:
+        prev = existentes.get((item_id, city), {})
+        if not sell_raw and not prev.get("sell_price_min"):
+            pares_sell_pendientes.add((item_id, city))
+        if not buy_raw and not prev.get("buy_price_max"):
+            pares_buy_pendientes.add((item_id, city))
+
+    # Consulta dirigida por (item, ciudad): trae solo el último registro con
+    # precio real (no None), evitando que 20000 filas mezcladas de otros
+    # items/ciudades desplacen el dato viejo válido que buscamos.
     ultimo_valido_hist = {}  # (item_id, city, "sell"|"buy") -> valor
-    items_pendientes = pendientes_sell | pendientes_buy
-    if items_pendientes:
+    for item_id, city in pares_sell_pendientes:
         hist_res = (
             supabase.table("precios_historico")
-            .select("item_id,city,sell_price_min,buy_price_max,ts")
-            .in_("item_id", list(items_pendientes))
+            .select("sell_price_min,ts")
+            .eq("item_id", item_id)
+            .eq("city", city)
+            .not_.is_("sell_price_min", "null")
             .order("ts", desc=True)
-            .limit(20000)
+            .limit(1)
             .execute()
         )
-        for h in (hist_res.data or []):
-            key_base = (h["item_id"], h["city"])
-            if h.get("sell_price_min") and ("sell", *key_base) not in ultimo_valido_hist:
-                ultimo_valido_hist[("sell", *key_base)] = h["sell_price_min"]
-            if h.get("buy_price_max") and ("buy", *key_base) not in ultimo_valido_hist:
-                ultimo_valido_hist[("buy", *key_base)] = h["buy_price_max"]
+        if hist_res.data:
+            ultimo_valido_hist[("sell", item_id, city)] = hist_res.data[0]["sell_price_min"]
+
+    for item_id, city in pares_buy_pendientes:
+        hist_res = (
+            supabase.table("precios_historico")
+            .select("buy_price_max,ts")
+            .eq("item_id", item_id)
+            .eq("city", city)
+            .not_.is_("buy_price_max", "null")
+            .order("ts", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if hist_res.data:
+            ultimo_valido_hist[("buy", item_id, city)] = hist_res.data[0]["buy_price_max"]
 
     rows = []
     historico_rows = []
@@ -2156,5 +2180,6 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
 
 
