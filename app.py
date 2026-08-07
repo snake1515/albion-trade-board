@@ -683,56 +683,51 @@ def fetch_and_store_prices():
     # Para los pares (item, ciudad) que YA estaban en None en precios_actuales
     # (o sea, ni el fallback anterior tenía nada), buscamos el último valor
     # válido alguna vez registrado en precios_historico, que nunca se pisa.
-    pendientes_sell = set()
-    pendientes_buy = set()
+    pendientes_sell_items = set()
+    pendientes_buy_items = set()
     for item_id, city, sell_raw, buy_raw, _ in rows_raw:
         prev = existentes.get((item_id, city), {})
         if not sell_raw and not prev.get("sell_price_min"):
-            pendientes_sell.add(item_id)
+            pendientes_sell_items.add(item_id)
         if not buy_raw and not prev.get("buy_price_max"):
-            pendientes_buy.add(item_id)
+            pendientes_buy_items.add(item_id)
 
-    # Pares (item_id, city) que de verdad necesitan fallback histórico
-    pares_sell_pendientes = set()
-    pares_buy_pendientes = set()
-    for item_id, city, sell_raw, buy_raw, _ in rows_raw:
-        prev = existentes.get((item_id, city), {})
-        if not sell_raw and not prev.get("sell_price_min"):
-            pares_sell_pendientes.add((item_id, city))
-        if not buy_raw and not prev.get("buy_price_max"):
-            pares_buy_pendientes.add((item_id, city))
-
-    # Consulta dirigida por (item, ciudad): trae solo el último registro con
-    # precio real (no None), evitando que 20000 filas mezcladas de otros
-    # items/ciudades desplacen el dato viejo válido que buscamos.
+    # Consultas agrupadas por item_id (no por cada par item+ciudad, para
+    # evitar N+1 round-trips a Supabase que provocaban WORKER TIMEOUT en
+    # Render). Filtramos ya los None en la propia query, así el límite no
+    # se desperdicia en filas vacías de otros ítems/ciudades como antes.
+    # ultimo_valido_hist guarda solo la fila MÁS reciente con precio real
+    # por cada (item_id, city), ya que venimos ordenados por ts desc.
     ultimo_valido_hist = {}  # (item_id, city, "sell"|"buy") -> valor
-    for item_id, city in pares_sell_pendientes:
+    if pendientes_sell_items:
         hist_res = (
             supabase.table("precios_historico")
-            .select("sell_price_min,ts")
-            .eq("item_id", item_id)
-            .eq("city", city)
+            .select("item_id,city,sell_price_min,ts")
+            .in_("item_id", list(pendientes_sell_items))
             .not_.is_("sell_price_min", "null")
             .order("ts", desc=True)
-            .limit(1)
+            .limit(5000)
             .execute()
         )
-        if hist_res.data:
-            ultimo_valido_hist[("sell", item_id, city)] = hist_res.data[0]["sell_price_min"]
+        for h in (hist_res.data or []):
+            key = ("sell", h["item_id"], h["city"])
+            if key not in ultimo_valido_hist:
+                ultimo_valido_hist[key] = h["sell_price_min"]
 
-    for item_id, city in pares_buy_pendientes:
+    if pendientes_buy_items:
         hist_res = (
             supabase.table("precios_historico")
-            .select("buy_price_max,ts")
-            .eq("item_id", item_id)
-            .eq("city", city)
+            .select("item_id,city,buy_price_max,ts")
+            .in_("item_id", list(pendientes_buy_items))
             .not_.is_("buy_price_max", "null")
             .order("ts", desc=True)
-            .limit(1)
+            .limit(5000)
             .execute()
         )
-        if hist_res.data:
-            ultimo_valido_hist[("buy", item_id, city)] = hist_res.data[0]["buy_price_max"]
+        for h in (hist_res.data or []):
+            key = ("buy", h["item_id"], h["city"])
+            if key not in ultimo_valido_hist:
+                ultimo_valido_hist[key] = h["buy_price_max"]
 
     rows = []
     historico_rows = []
@@ -2180,6 +2175,7 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
 
 
 
