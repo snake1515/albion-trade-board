@@ -2111,22 +2111,46 @@
       .filter(i => !busqueda || i.name.toLowerCase().includes(busqueda))
       .filter(i => porItem[i.id]); // solo items con al menos un precio guardado
 
-    const filasHtml = itemsAMostrar.map(item => {
-      const preciosPorCiudad = CITIES.map(city => {
-        const rec = porItem[item.id] && porItem[item.id][city.id];
-        return { city, precio: rec ? rec.sell_price_min : null };
-      });
-      const conocidos = preciosPorCiudad.filter(p => p.precio != null).map(p => p.precio);
-      const minPrecio = conocidos.length ? Math.min(...conocidos) : null;
-      const maxPrecio = conocidos.length ? Math.max(...conocidos) : null;
+    // Encuentra el mín/máx dentro de un arreglo de {city, precio}, ignorando
+    // nulos — se usa por separado para venta y para compra en cada fila.
+    function minMax(pares) {
+      const conocidos = pares.filter(p => p.precio != null).map(p => p.precio);
+      return {
+        min: conocidos.length > 1 ? Math.min(...conocidos) : null,
+        max: conocidos.length > 1 ? Math.max(...conocidos) : null,
+      };
+    }
 
-      const celdas = preciosPorCiudad.map(({ city, precio }) => {
-        if (precio == null) return `<td style="color:var(--text-muted); text-align:center;">—</td>`;
-        const esMin = precio === minPrecio && conocidos.length > 1;
-        const esMax = precio === maxPrecio && conocidos.length > 1;
-        const estilo = esMin ? 'color:#7fc9a3; font-weight:700;' : (esMax ? 'color:#d97a7a;' : '');
-        const tag = esMin ? ' 🔽' : (esMax ? ' 🔼' : '');
-        return `<td style="text-align:center; ${estilo}">${Math.round(precio).toLocaleString('es-CO')}${tag}</td>`;
+    const filasHtml = itemsAMostrar.map(item => {
+      const porCiudad = CITIES.map(city => {
+        const rec = porItem[item.id] && porItem[item.id][city.id];
+        return {
+          city,
+          venta: rec ? rec.sell_price_min : null,
+          compra: rec ? rec.buy_price_max : null,
+        };
+      });
+      const rangoVenta = minMax(porCiudad.map(p => ({ precio: p.venta })));
+      const rangoCompra = minMax(porCiudad.map(p => ({ precio: p.compra })));
+
+      const celdas = porCiudad.map(({ venta, compra }) => {
+        const fmtVenta = (() => {
+          if (venta == null) return `<div style="color:var(--text-muted); font-size:10px;">V: —</div>`;
+          const esMin = venta === rangoVenta.min, esMax = venta === rangoVenta.max;
+          const color = esMin ? '#7fc9a3' : (esMax ? '#d97a7a' : 'var(--text)');
+          const tag = esMin ? ' 🔽' : (esMax ? ' 🔼' : '');
+          return `<div style="color:${color}; font-weight:${esMin || esMax ? '700' : '500'};">V: ${Math.round(venta).toLocaleString('es-CO')}${tag}</div>`;
+        })();
+        const fmtCompra = (() => {
+          if (compra == null) return `<div style="color:var(--text-muted); font-size:10px;">C: —</div>`;
+          const esMin = compra === rangoCompra.min, esMax = compra === rangoCompra.max;
+          // Para compra (lo que te pagan), lo BUENO es que sea alto — por eso
+          // el color se invierte respecto a venta: el más alto es el verde.
+          const color = esMax ? '#7fc9a3' : (esMin ? '#d97a7a' : 'var(--teal)');
+          const tag = esMax ? ' 🔼' : (esMin ? ' 🔽' : '');
+          return `<div style="color:${color}; font-weight:${esMin || esMax ? '700' : '500'};">C: ${Math.round(compra).toLocaleString('es-CO')}${tag}</div>`;
+        })();
+        return `<td style="text-align:center; font-size:11px; line-height:1.5; padding:6px 8px;">${fmtVenta}${fmtCompra}</td>`;
       }).join('');
 
       return `<tr><td class="atb-item-name">${itemIcon(item.id)}${item.name}</td>${celdas}</tr>`;
@@ -2135,7 +2159,10 @@
     const headerCiudades = CITIES.map(c => `<th style="text-align:center;">${c.name}</th>`).join('');
 
     contentEl.innerHTML = `
-      <div class="atb-tip"><strong>Tip:</strong> el precio es "precio de venta" (ask) más reciente guardado por ciudad. 🔽 marca la ciudad más barata y 🔼 la más cara para cada item — útil para decidir dónde comprar.</div>
+      <div class="atb-tip">
+        <strong>Tip:</strong> por cada ciudad se muestra <strong>V</strong> (precio de venta / ask — lo que pagarías por comprar ahí) y <strong>C</strong> (precio de compra / bid — lo que te pagarían por vender ahí).
+        🔽🔼 marca la mejor y la peor ciudad de cada fila — para venta, "mejor" es la más barata (verde); para compra, "mejor" es la que más paga (verde).
+      </div>
 
       <div class="atb-field" style="max-width:340px; margin-bottom:16px;">
         <label for="atb-promedio-buscar">Buscar item</label>
@@ -3726,6 +3753,7 @@
 </script>
 </body>
 </html>
+
 
 
 
