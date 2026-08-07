@@ -663,28 +663,56 @@ def fetch_and_store_prices():
         print(f"Error consultando AODP: {e}")
         return
 
+    # Traemos los precios que ya tenemos guardados para no pisarlos con None
+    # cuando AODP responde 0 (= "sin orden activa en este momento", no "sin dato").
+    existentes_res = supabase.table("precios_actuales").select(
+        "item_id,city,sell_price_min,sell_price_min_date,buy_price_max,buy_price_max_date"
+    ).execute()
+    existentes = {
+        (e["item_id"], e["city"]): e for e in (existentes_res.data or [])
+    }
+
     rows = []
+    historico_rows = []
     for rec in data:
+        item_id = rec["item_id"]
+        city = _normalizar_ciudad_api(rec["city"])
+        prev = existentes.get((item_id, city), {})
+
+        # Valor "crudo" tal como llega de AODP (0 se guarda como 0, no como None)
+        sell_raw = rec.get("sell_price_min") or 0
+        buy_raw = rec.get("buy_price_max") or 0
+
+        # Para precios_actuales: si el nuevo valor es 0, conservamos el último
+        # precio válido en vez de sobreescribirlo con None.
+        sell_actual = sell_raw if sell_raw else prev.get("sell_price_min")
+        sell_date_actual = rec.get("sell_price_min_date") if sell_raw else prev.get("sell_price_min_date")
+        buy_actual = buy_raw if buy_raw else prev.get("buy_price_max")
+        buy_date_actual = rec.get("buy_price_max_date") if buy_raw else prev.get("buy_price_max_date")
+
         rows.append({
-            "item_id": rec["item_id"],
-            "city": _normalizar_ciudad_api(rec["city"]),
-            "sell_price_min": rec.get("sell_price_min") or None,
-            "sell_price_min_date": rec.get("sell_price_min_date") or None,
-            "buy_price_max": rec.get("buy_price_max") or None,
-            "buy_price_max_date": rec.get("buy_price_max_date") or None,
+            "item_id": item_id,
+            "city": city,
+            "sell_price_min": sell_actual,
+            "sell_price_min_date": sell_date_actual,
+            "buy_price_max": buy_actual,
+            "buy_price_max_date": buy_date_actual,
             "fetched_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+        # Para precios_historico guardamos el valor crudo de esta corrida
+        # (0 -> None), así el histórico refleja momentos reales sin oferta.
+        historico_rows.append({
+            "item_id": item_id,
+            "city": city,
+            "sell_price_min": sell_raw or None,
+            "buy_price_max": buy_raw or None,
         })
 
     if rows:
         supabase.table("precios_actuales").upsert(rows, on_conflict="item_id,city").execute()
         print(f"Guardados {len(rows)} registros de precios.")
 
-        historico_rows = [{
-            "item_id": r["item_id"],
-            "city": r["city"],
-            "sell_price_min": r["sell_price_min"],
-            "buy_price_max": r["buy_price_max"],
-        } for r in rows]
         supabase.table("precios_historico").insert(historico_rows).execute()
 
         compute_and_store_margins(rows, cfg)
@@ -2087,3 +2115,4 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
