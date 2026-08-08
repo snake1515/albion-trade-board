@@ -165,6 +165,10 @@
     border-left: 2px solid var(--teal); padding: 8px 12px;
     background: var(--panel-raised); border-radius: 0 4px 4px 0; margin-bottom: 16px;
   }
+  .atb-tip-purpose {
+    border-left-color: var(--gold-bright);
+  }
+  .atb-tip-purpose strong { color: var(--gold-bright); }
   .atb-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 22px; }
   .atb-summary-card { background: var(--panel-raised); border: 1px solid var(--hairline); border-radius: 6px; padding: 16px; }
   .atb-summary-card h3 { font-family: 'Cinzel', serif; font-weight: 700; font-size: 15px; color: var(--gold-bright); margin: 0 0 10px; }
@@ -741,6 +745,33 @@
     };
   }
 
+  // Banner "Para qué sirve" — un texto corto y fijo por pestaña que explica
+  // qué información muestra y para qué se usa, distinto del "Tip" operativo
+  // (que da consejos de estrategia). Se ve arriba de todo en cada pestaña.
+  const PURPOSE_TEXT = {
+    resumen: 'tu vistazo rápido del día — combina la mejor ruta de flip disponible y el mejor spread en un solo lugar para decidir en segundos si vale la pena entrar a comerciar ahora.',
+    inversion: 'aquí no ves precios de items, ves tu PLATA: cuánto capital le has metido a esto, cuánto tienes comprometido en compras sin vender todavía, y cuánto has ganado de verdad (realizado vs. estimado).',
+    items: 'compara precios de un mismo item entre varias ciudades — úsala para decidir dónde te conviene más comprarlo o venderlo.',
+    routes: 'compara rutas completas (comprar en una ciudad, vender en otra) para muchos items a la vez — úsala para decidir qué ruta de flip te conviene más ahora mismo.',
+    'promedio-item': 'busca un item puntual y compara su precio de venta (V) y de compra (C) en las 7 ciudades a la vez — clic en un item para ver su mejor precio y en qué ciudad está.',
+    spread: 'oportunidades de comprar y vender un item en la MISMA ciudad, sin transportar nada, aprovechando la diferencia entre lo que pagarías (V) y lo que te pagan (C) ahí mismo.',
+    'precios-hist': 'gráfica de cómo se ha movido el precio de un item en el tiempo (para detectar patrones de cuándo comprar barato), más una lista de las mejores rutas de todo el catálogo ahora mismo.',
+    history: 'el historial guardado de márgenes de un item específico a lo largo del tiempo — para ver si una ruta que te funcionó antes sigue siendo buena o ya se acabó.',
+    orders: 'registra las órdenes que pones en el juego, para medir cuánto tardan en venderse de verdad y así saber qué tan líquido es cada item.',
+    compras: 'registra compras que planeas revender pronto — acepta ventas parciales (vender de a poco) y te calcula la ganancia real de cada una.',
+    inventario: 'lo que guardas a más largo plazo en el banco — te muestra el % de cambio frente a lo que pagaste, y también acepta ventas parciales cuando decidas vender.',
+    estrategias: 'tu libreta de notas de compra/venta — anota patrones que descubras (horarios, rutas que funcionan, etc.) para no depender de la memoria.',
+    viajes: 'registra si un viaje tuvo problemas (te gankearon, etc.) para medir el riesgo real de cada ruta con datos tuyos, no solo estimados.',
+    builds: 'te sugiere qué build de equipo usar para farmear en Mist o mazmorras según tu maestría de arma y tu IP actual.',
+    recoleccion: 'te dice los mejores lugares y tiers para recolectar cada recurso según tu maestría, más un registro de lo que ya recolectaste.',
+    events: 'registro de eventos de la economía del juego (parches, cambios grandes) que pueden explicar por qué los precios se movieron de golpe.',
+  };
+  function purposeTip(tabKey) {
+    const texto = PURPOSE_TEXT[tabKey];
+    if (!texto) return '';
+    return `<div class="atb-tip atb-tip-purpose"><strong>📌 Para qué sirve:</strong> ${texto}</div>`;
+  }
+
   function render() {
     if (activeTab === 'resumen') { renderResumen(); return; }
     if (activeTab === 'inversion') { renderInversion(); return; }
@@ -864,7 +895,7 @@
     };
 
     if (!filteredRows.length) {
-      contentEl.innerHTML = cityFilterBar + '<div class="atb-tip"><strong>Tip:</strong> pon tu orden un poco por debajo del precio de compra actual (undercut mínimo) en vez de vender instantáneo — el spread es tu margen de maniobra, no una ganancia garantizada.</div><div class="atb-empty">No hay datos suficientes todavía, o el filtro de antigüedad es muy estricto.</div>';
+      contentEl.innerHTML = purposeTip('spread') + cityFilterBar + '<div class="atb-tip"><strong>Tip:</strong> pon tu orden un poco por debajo del precio de compra actual (undercut mínimo) en vez de vender instantáneo — el spread es tu margen de maniobra, no una ganancia garantizada.</div><div class="atb-empty">No hay datos suficientes todavía, o el filtro de antigüedad es muy estricto.</div>';
       bindSpreadFilter();
       return;
     }
@@ -893,7 +924,7 @@
       No indica qué tan rápido se vendería — para eso usa la pestaña "Seguimiento". Las filas marcadas con ⚠ tienen un spread tan grande (80%+) que casi
       siempre es un mercado sin volumen real u orden fantasma, no una oportunidad real.
     </p>`;
-    contentEl.innerHTML = cityFilterBar + '<div class="atb-tip"><strong>Tip:</strong> undercut mínimo (1-2 plata menos que el precio actual) suele venderse más rápido que undercuts grandes — no regales margen de golpe.</div>' + html;
+    contentEl.innerHTML = purposeTip('spread') + cityFilterBar + '<div class="atb-tip"><strong>Tip:</strong> undercut mínimo (1-2 plata menos que el precio actual) suele venderse más rápido que undercuts grandes — no regales margen de golpe.</div>' + html;
     bindSpreadFilter();
   }
 
@@ -928,6 +959,7 @@
     }
 
     contentEl.innerHTML = `
+      ${purposeTip('orders')}
       <div class="atb-tip"><strong>Tip:</strong> registra la orden apenas la pongas en el juego, no después — así la duración calculada es real. Con unas semanas de datos vas a notar qué items rotan rápido y cuáles se quedan pegados días.</div>
       <div class="atb-event-form">
         <div class="atb-field"><label for="atb-ord-item">Item</label><select id="atb-ord-item">${itemOptions}</select></div>
@@ -1274,6 +1306,7 @@
     const cantVentasPendientes = compras.reduce((sum, c) => sum + (c.ventas || []).filter(v => v.estado !== 'vendida').length, 0);
 
     contentEl.innerHTML = `
+      ${purposeTip('compras')}
       <div class="atb-tip"><strong>Tip:</strong> registra la compra apenas la hagas. Puedes vender de a poco — cada compra acepta varias ventas parciales. Cada venta empieza como "Pendiente" (la listaste, todavía no se vendió) y puedes seguir bajándole el precio hasta que la marques "Vendida" cuando de verdad se venda en el juego.</div>
 
       <div class="atb-field" style="max-width:340px; margin-bottom:16px;">
@@ -1866,6 +1899,7 @@
     }
 
     contentEl.innerHTML = `
+      ${purposeTip('inventario')}
       <div class="atb-tip"><strong>Tip:</strong> el % se calcula contra el precio de venta más bajo activo ahora mismo EN LA MISMA CIUDAD donde guardaste el item. Puedes vender de a poco — cada item del inventario acepta varias ventas parciales, igual que en "Mis compras": cada venta empieza "Pendiente" hasta que la marques "Vendida" cuando de verdad se venda en el juego.</div>
 
       <div class="atb-event-form">
@@ -2145,6 +2179,7 @@
     }
 
     contentEl.innerHTML = `
+      ${purposeTip('estrategias')}
       <div class="atb-tip"><strong>Tip:</strong> tu libreta de notas de estrategias de compra/venta — anota, por ejemplo, "en Caerleon compra mineral T6 antes de las 8pm hora servidor" o "vende pociones en Martlock los fines de semana". Filtra por ciudad o tipo para encontrarlas rápido.</div>
 
       <div class="atb-event-form">
@@ -2352,6 +2387,7 @@
     }
 
     contentEl.innerHTML = `
+      ${purposeTip('viajes')}
       <div class="atb-tip"><strong>Tip:</strong> registra cada viaje importante, tenga o no problemas — los viajes "sin problema" también cuentan para calcular el % de riesgo real de una ruta. Con el tiempo esto te dice si vale la pena arriesgar el mamut en cierta ruta o si mejor te cambias a algo más rápido.</div>
 
       <div class="atb-event-form">
@@ -2460,6 +2496,7 @@
     const buildsOtras = builds.filter(b => b.arma !== selectedWeapon);
 
     contentEl.innerHTML = `
+      ${purposeTip('builds')}
       <div class="atb-tip"><strong>Tip:</strong> la app no puede darte la ubicación de un portal de Mist o mazmorra — se generan al azar y los encuentras explorando tu zona. Si entras a una mazmorra solo, espera ~90 segundos antes de moverte para que el portal se cierre y nadie más pueda invadirte.</div>
 
       <div class="atb-controls-grid" style="margin-bottom:18px;">
@@ -2652,6 +2689,7 @@
     }
 
     contentEl.innerHTML = `
+      ${purposeTip('promedio-item')}
       <div class="atb-tip">
         <strong>Tip:</strong> por cada ciudad se muestra <strong>V</strong> (precio de venta / ask — lo que pagarías por comprar ahí) y <strong>C</strong> (precio de compra / bid — lo que te pagarían por vender ahí).
         🔽🔼 marca la mejor y la peor ciudad de cada fila — para venta, "mejor" es la más barata (verde); para compra, "mejor" es la que más paga (verde). Dale click a un item para ver su mejor precio arriba.
@@ -3032,6 +3070,7 @@
       }).join('') : '<p style="font-size:12px; color:var(--text-muted);">Todavía no has cerrado ninguna sesión.</p>';
 
       contentEl.innerHTML = `
+        ${purposeTip('recoleccion')}
         <div class="atb-tip"><strong>Cómo leer esto:</strong> "Recolectar en" es la ciudad/bioma donde ese material es más abundante — pero "Zona requerida"
         te dice si de verdad lo vas a encontrar cerca de esa ciudad (tiers bajos) o si tienes que meterte a zona roja/negra (tiers altos), que es donde de verdad está el riesgo real.
         "Refinar/vender en" es la ciudad con el bonus de refino. Un material aparece <strong>bloqueado (🔒)</strong> cuando el tier es más alto que el rango que registraste abajo — en el juego eso significa que todavía no tienes la herramienta para recolectarlo, sin importar tu nivel de especialización.</div>
@@ -3404,6 +3443,7 @@
     const impactLabels = { alto: 'Impacto alto', medio: 'Impacto medio', bajo: 'Impacto bajo' };
 
     contentEl.innerHTML = `
+      ${purposeTip('resumen')}
       <div class="atb-summary-grid">
         <div class="atb-summary-card">
           <h3>1. Comprar, transportar, vender</h3>
@@ -3503,13 +3543,14 @@
   }
 
   function renderTable(list) {
+    const purpose = purposeTip(activeTab === 'routes' ? 'routes' : 'items');
     const tip = activeTab === 'routes'
       ? '<div class="atb-tip"><strong>Tip:</strong> ordena mentalmente por puntaje, no por margen bruto — dos rutas con margen parecido pueden tener riesgo muy distinto. Evita cargar items pesados en rutas de riesgo alto si vas justo de tiempo para reaccionar a un gank.</div>'
       : '<div class="atb-tip"><strong>Tip:</strong> revisa el punto rojo (●) al lado del item — indica que el precio tiene más de 6 horas. Confírmalo en el juego antes de comprometerte con el viaje.</div>';
     const filterBar = routeFilterBarHtml();
 
     if (!list.length) {
-      contentEl.innerHTML = filterBar + tip + '<div class="atb-empty">No hay rutas rentables con los filtros actuales, o todavía no hay precios guardados. Dale clic a "Traer últimos precios".</div>';
+      contentEl.innerHTML = purpose + filterBar + tip + '<div class="atb-empty">No hay rutas rentables con los filtros actuales, o todavía no hay precios guardados. Dale clic a "Traer últimos precios".</div>';
       bindRouteFilterBar();
       return;
     }
@@ -3536,7 +3577,7 @@
       </tr>`;
     });
     html += '</tbody></table>';
-    contentEl.innerHTML = filterBar + tip + html;
+    contentEl.innerHTML = purpose + filterBar + tip + html;
     bindRouteFilterBar();
   }
 
@@ -3557,6 +3598,7 @@
       </tr>`).join('');
 
     contentEl.innerHTML = `
+      ${purposeTip('history')}
       <div class="atb-field" style="max-width:280px; margin-bottom:16px;">
         <label for="atb-history-select">Item</label>
         <select id="atb-history-select">${itemOptions}</select>
@@ -3812,6 +3854,7 @@
       </tr>`).join('');
 
     contentEl.innerHTML = `
+      ${purposeTip('precios-hist')}
       <p class="atb-section-label">Sugerencias — mejores oportunidades ahora mismo</p>
       <p class="atb-field-hint" style="margin-bottom:10px;">
         Ordenadas por retorno por hora (margen ÷ tu tiempo real de venta) cuando ya tienes historial de ese item;
@@ -4051,6 +4094,7 @@
     }).join('');
 
     contentEl.innerHTML = `
+      ${purposeTip('inversion')}
       <div class="atb-tip">
         <strong>Cómo leer esto:</strong> esta pestaña no reemplaza "Mis compras" — la resume desde el ángulo del
         capital. "Aportes/retiros" es la plata que tú decides dedicarle a esto (ej. convertir oro a plata).
@@ -4165,6 +4209,7 @@
       </div>`).join('');
 
     contentEl.innerHTML = `
+      ${purposeTip('events')}
       <div class="atb-tip">
         <strong>Traer noticias:</strong> trae los anuncios oficiales recientes desde el Steam News Hub de Albion Online
         (parches, temporadas, eventos) y los agrega abajo sin duplicar. El sitio oficial de Albion y su foro bloquean
