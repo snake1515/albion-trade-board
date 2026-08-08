@@ -1434,11 +1434,31 @@
       }
 
       if (chkInventario.checked) {
-        await fetch('/api/inventario', {
+        // Antes esto llamaba directo a /api/inventario, sin pasar por
+        // "Mis compras" — la plata pagada nunca quedaba registrada como
+        // compra, así que jamás se restaba del capital comprometido en la
+        // pestaña Inversión (ese cálculo solo lee de /api/compras). Ahora
+        // se crea la compra igual que el flujo normal (para que SÍ cuente
+        // como capital comprometido) y de inmediato se mueve al inventario
+        // con el mismo endpoint que usa el botón "Mover a inventario" — así
+        // se reusa toda la lógica de capital ya corregida, sin duplicar nada.
+        const resCompra = await fetch('/api/compras', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ item_id, ciudad_banco: city, precio_compra: precio_oro, cantidad, nota }),
+          body: JSON.stringify({
+            item_id, city_compra, city, precio_oro, cantidad, nota, origen,
+            ya_comprado: true, tarifa_pct: 0,
+          }),
         });
+        const compraCreada = await resCompra.json();
+        const compraId = Array.isArray(compraCreada) ? compraCreada[0]?.id : compraCreada?.id;
+        if (compraId) {
+          await fetch(`/api/compras/${compraId}/mover-inventario`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cantidad, ciudad_banco: city }),
+          });
+        }
         activeTab = 'inventario';
         updateTabActiveStates();
         renderInventario();
@@ -4060,10 +4080,17 @@
     const capitalAportado = movimientos.reduce((s, m) => s + (m.tipo === 'aporte' ? Number(m.monto) : -Number(m.monto)), 0);
 
     // Capital comprometido = plata metida en compras activas que todavía no
-    // volvió como efectivo. Dos partes:
+    // volvió como efectivo. Tres partes:
     // - lo YA comprado (a su costo real ponderado) que no se ha recuperado
     //   vendiendo (ni confirmado, ni listado-sin-confirmar todavía) —
     //   backend ya lo calcula como cantidad_disponible_venta
+    // - lo movido a INVENTARIO — OJO: el backend resta esto de
+    //   cantidad_disponible_venta como si esa plata ya hubiera vuelto, pero
+    //   moverlo a inventario NO es venderlo, solo cambia de ubicación (pasa
+    //   de "listado en esta orden" a "guardado en el banco"). Si no lo
+    //   sumamos de vuelta aquí, el capital se "libera" solo con el botón
+    //   "Mover a inventario" sin que haya entrado ni un peso — por eso se
+    //   vuelve a agregar explícitamente.
     // - lo que la orden aún no ha llenado, valorado al precio vigente de la
     //   orden (lo que el juego reserva/pediría para completarla)
     const capitalComprometido = comprasCapital.reduce((s, c) => {
@@ -4072,7 +4099,8 @@
       // fills + la tarifa de publicación (esta última se paga aunque no se
       // haya comprado ni una unidad todavía, por eso NO depende de cantidadComprada).
       const costoTotalGastado = Number(c.costo_total_comprado || 0) + Number(c.tarifa_pagada_orden || 0);
-      const cantidadSinRecuperar = Number(c.cantidad_disponible_venta || 0);
+      const cantidadMovidaInventario = Number(c.cantidad_movida_inventario || 0);
+      const cantidadSinRecuperar = Number(c.cantidad_disponible_venta || 0) + cantidadMovidaInventario;
       const costoSinRecuperar = cantidadComprada > 0
         ? (cantidadSinRecuperar / cantidadComprada) * costoTotalGastado
         : costoTotalGastado;
@@ -4390,16 +4418,3 @@
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
