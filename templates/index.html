@@ -296,6 +296,7 @@
         <button class="atb-tab atb-tab-menu-item" data-tab="orders">Seguimiento</button>
         <button class="atb-tab atb-tab-menu-item" data-tab="compras">Mis compras</button>
         <button class="atb-tab atb-tab-menu-item" data-tab="inventario">Inventario</button>
+        <button class="atb-tab atb-tab-menu-item" data-tab="estrategias">Estrategias</button>
         <button class="atb-tab atb-tab-menu-item" data-tab="viajes">Viajes</button>
       </div>
     </div>
@@ -350,6 +351,12 @@
   let lastComprasData = [];
   let comprasBusqueda = '';
   let comprasExpandidas = new Set();
+  let lastInventarioData = [];
+  let inventarioBusqueda = '';
+  let inventarioExpandidas = new Set();
+  let lastEstrategiasData = [];
+  let estrategiasFiltroCiudad = '';
+  let estrategiasFiltroTipo = '';
   const WEAPON_TIPS = {{ weapon_tips_json | safe }};
   const GATHERING_BIOME = {{ gathering_biome_json | safe }};
   const REFINING_BONUS_CITY = {{ refining_bonus_json | safe }};
@@ -744,6 +751,7 @@
     if (activeTab === 'orders') { renderOrders(); return; }
     if (activeTab === 'compras') { renderCompras(); return; }
     if (activeTab === 'inventario') { renderInventario(); return; }
+    if (activeTab === 'estrategias') { renderEstrategias(); return; }
     if (activeTab === 'viajes') { renderViajes(); return; }
     if (activeTab === 'builds') { renderBuilds(); return; }
     if (activeTab === 'recoleccion') { renderRecoleccion(); return; }
@@ -1703,14 +1711,67 @@
   async function renderInventario() {
     contentEl.innerHTML = '<div class="atb-empty">Cargando inventario...</div>';
     const res = await fetch('/api/inventario');
-    const inv = await res.json();
+    lastInventarioData = await res.json();
+    renderInventarioBody();
+  }
+
+  function ventasSubfilaInv(f) {
+    if (!f.ventas || !f.ventas.length) return '';
+    const filas = f.ventas.map(v => {
+      const esPendiente = v.estado !== 'vendida';
+      const totalVenta = Number(v.precio_venta) * Number(v.cantidad);
+      const costoBase = Number(f.precio_compra);
+      const precioNeto = Number(v.precio_venta) * (1 - (Number(v.tax_pct || 0) + Number(v.tarifa_pct || 0)) / 100);
+      const ganancia = (precioNeto - costoBase) * Number(v.cantidad);
+      const fecha = v.fecha ? new Date(v.fecha).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) : '';
+      const badge = esPendiente
+        ? `<span class="atb-rent-badge atb-rent-warn" style="font-size:10px;">Pendiente</span>`
+        : `<span class="atb-rent-badge atb-rent-ok" style="font-size:10px;">Vendida</span>`;
+      const cantCell = esPendiente
+        ? `<input type="number" class="atb-inv-venta-cant-edit" data-id="${v.id}" value="${v.cantidad}" min="0.0001" step="any" style="width:60px;">`
+        : `<span>${v.cantidad}</span>`;
+      const precioCell = esPendiente
+        ? `<input type="number" class="atb-inv-venta-precio-edit" data-id="${v.id}" value="${v.precio_venta}" min="0" style="width:80px;">`
+        : `<span>${Math.round(v.precio_venta).toLocaleString('es-CO')}</span>`;
+      const acciones = esPendiente
+        ? `<button class="atb-btn atb-inv-venta-guardar-precio" data-id="${v.id}" style="padding:3px 8px; font-size:10px;">Guardar</button>
+           <button class="atb-btn atb-inv-venta-marcar-vendida" data-id="${v.id}" style="padding:3px 8px; font-size:10px; background:var(--teal); color:#0d1712;">Marcar vendida</button>`
+        : `<button class="atb-btn atb-inv-venta-nota-guardar" data-id="${v.id}" style="padding:3px 8px; font-size:10px;">Guardar nota</button>
+           <button class="atb-event-del atb-inv-venta-marcar-pendiente" data-id="${v.id}" style="font-size:10px;">Revertir a pendiente</button>`;
+      return `
+        <div class="atb-block-row" style="flex-direction:column; align-items:stretch;">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span style="color:var(--text-muted); width:55px;">${fecha}</span>
+            ${badge}
+            ${cantCell}
+            <span style="color:var(--text-muted);">uds ×</span>
+            ${precioCell}
+            <span style="color:#7fc9a3; font-weight:600;">+${Math.round(totalVenta).toLocaleString('es-CO')}</span>
+            <span style="color:${ganancia >= 0 ? '#7fc9a3' : '#d97a7a'};">(${ganancia >= 0 ? '+' : ''}${Math.round(ganancia).toLocaleString('es-CO')}${esPendiente ? ' est.' : ''})</span>
+            ${acciones}
+            <button class="atb-event-del atb-inv-venta-del" data-id="${v.id}" style="margin-left:auto; font-size:10px;">Borrar venta</button>
+          </div>
+          <div style="margin-top:4px; padding-left:63px;">
+            <input type="text" class="atb-inv-venta-nota-edit" data-id="${v.id}" value="${(v.nota || '').replace(/"/g, '&quot;')}" placeholder="nota (ej. estas 20 van para Caerleon)" style="width:260px; font-size:10.5px;">
+          </div>
+        </div>`;
+    }).join('');
+    return `<div class="atb-ventas-block"><div class="atb-block-title">💰 Ventas parciales (dinero que entra)</div>${filas}</div>`;
+  }
+
+  function renderInventarioBody() {
+    const inv0 = lastInventarioData;
+    const busqueda = inventarioBusqueda.trim().toLowerCase();
+    const inv = busqueda
+      ? inv0.filter(f => (f.item_name || '').toLowerCase().includes(busqueda) || (f.ciudad_banco || '').toLowerCase().includes(busqueda))
+      : inv0;
 
     const itemOptions = ITEMS.map(i => `<option value="${i.id}">${i.name}</option>`).join('');
     const cityOptions = CITIES.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
 
     // Agrupado por ciudad de banco — así ves de un vistazo qué tienes dónde
     const porCiudad = {};
-    inv.forEach(f => {
+    inv0.forEach(f => {
       porCiudad[f.ciudad_banco] = porCiudad[f.ciudad_banco] || [];
       porCiudad[f.ciudad_banco].push(f);
     });
@@ -1718,9 +1779,11 @@
       .map(([ciudad, items]) => `<span class="atb-badge" style="margin:2px 4px 2px 0;">${ciudad}: ${items.length}</span>`)
       .join('') || '<span style="color:var(--text-muted); font-size:12px;">Todavía no tienes nada registrado.</span>';
 
-    const valorTotalCompra = inv.reduce((s, f) => s + Number(f.valor_total_compra || 0), 0);
-    const valorTotalActual = inv.reduce((s, f) => s + (f.valor_total_actual != null ? Number(f.valor_total_actual) : Number(f.valor_total_compra || 0)), 0);
+    const valorTotalCompra = inv0.reduce((s, f) => s + Number(f.valor_total_compra || 0), 0);
+    const valorTotalActual = inv0.reduce((s, f) => s + (f.valor_total_actual != null ? Number(f.valor_total_actual) : Number(f.valor_total_compra || 0)), 0);
     const diferenciaTotal = valorTotalActual - valorTotalCompra;
+    const gananciaNeta = inv0.reduce((s, f) => s + Number(f.ganancia_acumulada || 0), 0);
+    const gananciaPendienteTotal = inv0.reduce((s, f) => s + Number(f.ganancia_pendiente_estimada || 0), 0);
 
     function pctBadge(pct) {
       if (pct == null) return `<span style="color:var(--text-muted); font-size:11px;">sin precio actual</span>`;
@@ -1729,28 +1792,88 @@
       return `<span class="atb-rent-badge ${cls}">${signo}${pct}%</span>`;
     }
 
-    const filas = inv.map(f => `
-      <tr>
-        <td class="atb-item-name">${itemIcon(f.item_id)}${f.item_name}</td>
-        <td>${f.ciudad_banco}</td>
-        <td>${f.cantidad}</td>
-        <td>${Math.round(f.precio_compra).toLocaleString('es-CO')}</td>
-        <td>${f.precio_actual != null ? Math.round(f.precio_actual).toLocaleString('es-CO') : '—'}</td>
-        <td>${pctBadge(f.pct_cambio)}</td>
-        <td>${Math.round(f.valor_total_compra).toLocaleString('es-CO')}</td>
-        <td style="font-size:11px; color:var(--text-muted);">${f.nota || ''}</td>
-        <td><button class="atb-event-del atb-inv-del" data-id="${f.id}">Borrar</button></td>
-      </tr>`).join('');
+    const CARD_COLORS = ['#d4a24c', '#4c9fd4', '#7fc9a3', '#c97fc9', '#e0855a', '#8aa9d4', '#c9c14c', '#6bc9a8'];
+
+    function rowInventario(f) {
+      const disponible = Number(f.cantidad_disponible_venta ?? f.cantidad);
+      const pendienteVenta = Number(f.cantidad_pendiente_venta || 0);
+      const sinCupoParaVender = disponible <= 0.0001;
+      const ventaForm = sinCupoParaVender
+        ? `<span style="color:var(--text-muted); font-size:11px;">Todo ya está listado/vendido.</span>`
+        : `
+          <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:end;">
+            <input type="number" class="atb-inv-cant-venta" data-id="${f.id}" min="0.0001" max="${disponible}" step="any" value="${disponible}" placeholder="cant." style="width:70px;" title="Cantidad a listar para venta (por defecto: todo lo disponible)">
+            <input type="number" class="atb-inv-precio-venta" data-id="${f.id}" min="0" placeholder="precio c/u" style="width:90px;">
+            <input type="text" class="atb-inv-nota-venta" data-id="${f.id}" placeholder="nota (ej. estas van para Caerleon)" style="width:170px; font-size:11px;">
+            <button class="atb-btn atb-inv-vender-btn" style="padding:6px 10px; font-size:11px;" data-id="${f.id}">Registrar venta</button>
+          </div>
+          <div class="atb-field-hint atb-inv-venta-preview" data-preview-id="${f.id}" style="margin-top:4px;">Escribe un precio para ver cuánto te cobra el juego de impuesto + tarifa.</div>`;
+      const cantidadCell = (Number(f.cantidad_vendida) > 0 || pendienteVenta > 0)
+        ? `${disponible} <span style="color:var(--text-muted); font-size:10px;">disponibles de ${f.cantidad}</span>${pendienteVenta > 0 ? `<div style="color:#e0a53a; font-size:10px;">${pendienteVenta} listadas, sin confirmar</div>` : ''}`
+        : `${f.cantidad}`;
+      const gananciaAcum = Number(f.ganancia_acumulada || 0);
+      const gananciaPend = Number(f.ganancia_pendiente_estimada || 0);
+      const gananciaTag = f.ventas && f.ventas.length
+        ? `<div style="font-size:10px; margin-top:4px; color:${gananciaAcum >= 0 ? '#7fc9a3' : '#d97a7a'};">${gananciaAcum >= 0 ? '+' : ''}${Math.round(gananciaAcum).toLocaleString('es-CO')} confirmada${pendienteVenta > 0 ? `<br><span style="color:var(--text-muted);">${gananciaPend >= 0 ? '+' : ''}${Math.round(gananciaPend).toLocaleString('es-CO')} estimada (pendiente)</span>` : ''}</div>`
+        : '';
+      const color = CARD_COLORS[f.id % CARD_COLORS.length];
+      const expandida = inventarioExpandidas.has(String(f.id));
+      const subfilas = ventasSubfilaInv(f);
+
+      return `
+        <div class="atb-compra-card" style="border-left-color:${color};">
+          <div class="atb-compra-card-header atb-inv-toggle" data-id="${f.id}" style="cursor:pointer;">
+            <span class="atb-compra-chevron" style="display:inline-block; width:14px; color:var(--text-muted); transition:transform 0.15s;">${expandida ? '▼' : '▶'}</span>
+            <span class="atb-compra-id" style="border-color:${color}; color:${color};">Inv #${f.id}</span>
+            <span class="atb-item-name">${itemIcon(f.item_id)}${f.item_name}</span>
+            <span class="atb-route">${f.ciudad_banco}</span>
+            ${f.vendido ? `<span class="atb-rent-badge atb-rent-ok" style="font-size:10px;">Todo vendido</span>` : ''}
+            <span style="color:var(--text-muted); font-weight:600; font-size:12px;">${Math.round(f.valor_total_compra).toLocaleString('es-CO')}</span>
+            <span style="margin-left:auto;">
+              <button class="atb-event-del atb-inv-del" data-id="${f.id}">Borrar</button>
+            </span>
+          </div>
+
+          <div id="atb-inv-body-${f.id}" style="display:${expandida ? 'block' : 'none'};">
+            <div class="atb-compra-card-grid">
+              <div>
+                <label>Precio compra c/u</label>
+                <span>${Math.round(f.precio_compra).toLocaleString('es-CO')}</span>
+              </div>
+              <div>
+                <label>Precio actual c/u</label>
+                <span>${f.precio_actual != null ? Math.round(f.precio_actual).toLocaleString('es-CO') : '—'}</span>
+                <div style="margin-top:4px;">${pctBadge(f.pct_cambio)}</div>
+              </div>
+              <div>
+                <label>Disponible para vender</label>
+                ${cantidadCell}
+                ${gananciaTag}
+              </div>
+              <div>
+                <label>Nota</label>
+                <div style="display:flex; gap:6px;"><input type="text" class="atb-inv-nota-edit" data-id="${f.id}" value="${(f.nota || '').replace(/"/g, '&quot;')}" placeholder="ej. para craftear armadura T6..." style="flex:1; font-size:11px;"><button class="atb-btn atb-inv-nota-guardar" data-id="${f.id}" style="padding:4px 8px; font-size:10px;">Guardar</button></div>
+              </div>
+            </div>
+
+            <div class="atb-compra-card-actions" style="border-top:none; padding-top:0; flex-direction:column; align-items:stretch;">
+              <div><label style="display:block; font-size:9px; color:var(--text-muted); margin-bottom:4px;">Registrar venta parcial</label>${ventaForm}</div>
+            </div>
+
+            ${subfilas}
+          </div>
+        </div>`;
+    }
 
     contentEl.innerHTML = `
-      <div class="atb-tip"><strong>Tip:</strong> el % se calcula contra el precio de venta más bajo activo ahora mismo EN LA MISMA CIUDAD donde guardaste el item — si lo mueves a otra ciudad, borra y vuelve a registrarlo ahí para que la comparación siga siendo real.</div>
+      <div class="atb-tip"><strong>Tip:</strong> el % se calcula contra el precio de venta más bajo activo ahora mismo EN LA MISMA CIUDAD donde guardaste el item. Puedes vender de a poco — cada item del inventario acepta varias ventas parciales, igual que en "Mis compras": cada venta empieza "Pendiente" hasta que la marques "Vendida" cuando de verdad se venda en el juego.</div>
 
       <div class="atb-event-form">
         <div class="atb-field"><label for="atb-inv-item">Item</label><select id="atb-inv-item">${itemOptions}</select></div>
         <div class="atb-field"><label for="atb-inv-ciudad">Banco (ciudad)</label><select id="atb-inv-ciudad">${cityOptions}</select></div>
         <div class="atb-field"><label for="atb-inv-precio">Precio de compra (c/u)</label><input type="number" id="atb-inv-precio" min="0"></div>
         <div class="atb-field"><label for="atb-inv-cantidad">Cantidad</label><input type="number" id="atb-inv-cantidad" value="1" min="1"></div>
-        <div class="atb-field" style="grid-column: span 2;"><label for="atb-inv-nota">Nota (opcional)</label><input type="text" id="atb-inv-nota" placeholder="ej. para craftear armadura T6..."></div>
+        <div class="atb-field" style="grid-column: span 2;"><label for="atb-inv-nota-add">Nota (opcional)</label><input type="text" id="atb-inv-nota-add" placeholder="ej. para craftear armadura T6..."></div>
         <button class="atb-btn" id="atb-inv-add">Agregar al inventario</button>
       </div>
 
@@ -1770,12 +1893,19 @@
           <div class="atb-summary-value" style="color:${diferenciaTotal >= 0 ? '#7fc9a3' : '#d97a7a'};">${Math.round(valorTotalActual).toLocaleString('es-CO')} plata</div>
           <div class="atb-summary-sub">${diferenciaTotal >= 0 ? '+' : ''}${Math.round(diferenciaTotal).toLocaleString('es-CO')} vs. lo que pagaste (solo items con precio actual conocido)</div>
         </div>
+        <div class="atb-summary-card">
+          <h3>Ganancia confirmada por ventas</h3>
+          <div class="atb-summary-value" style="color:${gananciaNeta >= 0 ? '#7fc9a3' : '#d97a7a'};">${gananciaNeta >= 0 ? '+' : ''}${Math.round(gananciaNeta).toLocaleString('es-CO')} plata</div>
+          <div class="atb-summary-sub">${gananciaPendienteTotal !== 0 ? `${gananciaPendienteTotal >= 0 ? '+' : ''}${Math.round(gananciaPendienteTotal).toLocaleString('es-CO')} estimada en ventas pendientes por confirmar` : 'Solo cuenta ventas ya confirmadas'}</div>
+        </div>
       </div>
 
-      <table class="atb-table">
-        <thead><tr><th>Item</th><th>Banco</th><th>Cant.</th><th>Precio compra c/u</th><th>Precio actual c/u</th><th>% cambio</th><th>Total pagado</th><th>Nota</th><th></th></tr></thead>
-        <tbody>${filas || '<tr><td colspan="9" class="atb-empty">Todavía no tienes nada registrado en el inventario.</td></tr>'}</tbody>
-      </table>
+      <div class="atb-field" style="max-width:340px; margin-bottom:14px;">
+        <label for="atb-inv-buscar">Buscar item o ciudad</label>
+        <input type="text" id="atb-inv-buscar" placeholder="ej. mineral, Caerleon..." value="${inventarioBusqueda.replace(/"/g, '&quot;')}">
+      </div>
+
+      <div class="atb-compra-cards">${inv.map(f => rowInventario(f)).join('') || '<div class="atb-empty">Todavía no tienes nada registrado en el inventario.</div>'}</div>
     `;
 
     document.getElementById('atb-inv-add').addEventListener('click', async () => {
@@ -1789,10 +1919,177 @@
           ciudad_banco: document.getElementById('atb-inv-ciudad').value,
           precio_compra,
           cantidad: Number(document.getElementById('atb-inv-cantidad').value) || 1,
-          nota: document.getElementById('atb-inv-nota').value.trim(),
+          nota: document.getElementById('atb-inv-nota-add').value.trim(),
         }),
       });
       renderInventario();
+    });
+
+    document.getElementById('atb-inv-buscar').addEventListener('input', (e) => {
+      inventarioBusqueda = e.target.value;
+      const cursorPos = e.target.selectionStart;
+      renderInventarioBody();
+      const nuevoInput = document.getElementById('atb-inv-buscar');
+      if (nuevoInput) {
+        nuevoInput.focus();
+        nuevoInput.setSelectionRange(cursorPos, cursorPos);
+      }
+    });
+
+    contentEl.querySelectorAll('.atb-inv-toggle').forEach(header => {
+      header.addEventListener('click', (e) => {
+        if (e.target.closest('button, a, input, select')) return;
+        const id = header.dataset.id;
+        const body = document.getElementById('atb-inv-body-' + id);
+        const chevron = header.querySelector('.atb-compra-chevron');
+        if (!body) return;
+        const abrir = body.style.display === 'none';
+        body.style.display = abrir ? 'block' : 'none';
+        if (chevron) chevron.textContent = abrir ? '▼' : '▶';
+        if (abrir) inventarioExpandidas.add(id); else inventarioExpandidas.delete(id);
+      });
+    });
+
+    function actualizarPreviewVentaInv(id) {
+      const precioInput = contentEl.querySelector(`.atb-inv-precio-venta[data-id="${id}"]`);
+      const cantInput = contentEl.querySelector(`.atb-inv-cant-venta[data-id="${id}"]`);
+      const previewEl = contentEl.querySelector(`.atb-inv-venta-preview[data-preview-id="${id}"]`);
+      if (!precioInput || !previewEl) return;
+      const precio_venta = Number(precioInput.value);
+      const cantidad = Number(cantInput ? cantInput.value : 0) || 0;
+      if (!precio_venta || precio_venta <= 0) {
+        previewEl.textContent = 'Escribe un precio para ver cuánto te cobra el juego de impuesto + tarifa.';
+        return;
+      }
+      const tax_pct = Number(document.getElementById('atb-tax').value) || 0;
+      const tarifa_pct = Number(document.getElementById('atb-setupfee').value) || 0;
+      const bruto = precio_venta * cantidad;
+      const montoTax = bruto * tax_pct / 100;
+      const montoTarifa = bruto * tarifa_pct / 100;
+      const neto = bruto - montoTax - montoTarifa;
+      previewEl.innerHTML = `Bruto: ${Math.round(bruto).toLocaleString('es-CO')} · Impuesto (${tax_pct}%): -${Math.round(montoTax).toLocaleString('es-CO')} · Tarifa (${tarifa_pct}%): -${Math.round(montoTarifa).toLocaleString('es-CO')} · <strong style="color:var(--text);">Recibes: ${Math.round(neto).toLocaleString('es-CO')}</strong>`;
+    }
+    contentEl.querySelectorAll('.atb-inv-precio-venta, .atb-inv-cant-venta').forEach(inp => {
+      inp.addEventListener('input', () => actualizarPreviewVentaInv(inp.dataset.id));
+    });
+
+    contentEl.querySelectorAll('.atb-inv-vender-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const precioInput = contentEl.querySelector(`.atb-inv-precio-venta[data-id="${id}"]`);
+        const cantInput = contentEl.querySelector(`.atb-inv-cant-venta[data-id="${id}"]`);
+        const notaInput = contentEl.querySelector(`.atb-inv-nota-venta[data-id="${id}"]`);
+        const precio_venta = Number(precioInput ? precioInput.value : 0);
+        const cantidad = Number(cantInput ? cantInput.value : 0);
+        const nota = notaInput ? notaInput.value.trim() : '';
+        if (!precio_venta || precio_venta <= 0) {
+          alert('Ingresa el precio de venta (c/u) antes de registrar la venta.');
+          return;
+        }
+        if (!cantidad || cantidad <= 0) {
+          alert('Ingresa una cantidad válida para vender.');
+          return;
+        }
+        const tax_pct = Number(document.getElementById('atb-tax').value) || 0;
+        const tarifa_pct = Number(document.getElementById('atb-setupfee').value) || 0;
+        const resp = await fetch('/api/inventario/' + id + '/vender', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ precio_venta, cantidad, tax_pct, tarifa_pct, nota }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          alert(err.error || 'No se pudo registrar la venta.');
+          return;
+        }
+        inventarioExpandidas.add(id);
+        renderInventario();
+      });
+    });
+
+    contentEl.querySelectorAll('.atb-inv-venta-guardar-precio').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const precioInput = contentEl.querySelector(`.atb-inv-venta-precio-edit[data-id="${id}"]`);
+        const cantInput = contentEl.querySelector(`.atb-inv-venta-cant-edit[data-id="${id}"]`);
+        const notaInput = contentEl.querySelector(`.atb-inv-venta-nota-edit[data-id="${id}"]`);
+        const precio_venta = Number(precioInput ? precioInput.value : 0);
+        const cantidad = Number(cantInput ? cantInput.value : 0);
+        const nota = notaInput ? notaInput.value.trim() : '';
+        if (!precio_venta || precio_venta <= 0) {
+          alert('Ingresa un precio válido.');
+          return;
+        }
+        if (!cantidad || cantidad <= 0) {
+          alert('Ingresa una cantidad válida.');
+          return;
+        }
+        const resp = await fetch('/api/inventario/ventas/' + id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ precio_venta, cantidad, nota }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          alert(err.error || 'No se pudo actualizar la venta.');
+          return;
+        }
+        renderInventario();
+      });
+    });
+
+    contentEl.querySelectorAll('.atb-inv-venta-nota-guardar').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const notaInput = contentEl.querySelector(`.atb-inv-venta-nota-edit[data-id="${id}"]`);
+        const nota = notaInput ? notaInput.value.trim() : '';
+        const resp = await fetch('/api/inventario/ventas/' + id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nota }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          alert(err.error || 'No se pudo actualizar la nota.');
+          return;
+        }
+        renderInventario();
+      });
+    });
+
+    contentEl.querySelectorAll('.atb-inv-venta-marcar-vendida').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch('/api/inventario/ventas/' + btn.dataset.id + '/marcar-vendida', { method: 'POST' });
+        renderInventario();
+      });
+    });
+
+    contentEl.querySelectorAll('.atb-inv-venta-marcar-pendiente').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch('/api/inventario/ventas/' + btn.dataset.id + '/marcar-pendiente', { method: 'POST' });
+        renderInventario();
+      });
+    });
+
+    contentEl.querySelectorAll('.atb-inv-venta-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch('/api/inventario/ventas/' + btn.dataset.id, { method: 'DELETE' });
+        renderInventario();
+      });
+    });
+
+    contentEl.querySelectorAll('.atb-inv-nota-guardar').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const notaInput = contentEl.querySelector(`.atb-inv-nota-edit[data-id="${id}"]`);
+        const nota = notaInput ? notaInput.value.trim() : '';
+        await fetch('/api/inventario/' + id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nota }),
+        });
+        renderInventario();
+      });
     });
 
     contentEl.querySelectorAll('.atb-inv-del').forEach(btn => {
@@ -1802,6 +2099,140 @@
       });
     });
   }
+
+  const ESTRATEGIA_TIPO_INFO = {
+    compra: { label: 'Compra', color: '#7fc9a3' },
+    venta: { label: 'Venta', color: '#e0855a' },
+    general: { label: 'General', color: '#4c9fd4' },
+  };
+
+  async function renderEstrategias() {
+    contentEl.innerHTML = '<div class="atb-empty">Cargando estrategias...</div>';
+    const res = await fetch('/api/estrategias');
+    lastEstrategiasData = await res.json();
+    renderEstrategiasBody();
+  }
+
+  function renderEstrategiasBody() {
+    const itemOptions = '<option value="">Ninguno (estrategia general)</option>' + ITEMS.map(i => `<option value="${i.id}">${i.name}</option>`).join('');
+    const cityOptionsForm = '<option value="">Todas las ciudades</option>' + CITIES.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    const cityOptionsFiltro = '<option value="">Todas las ciudades</option>' + CITIES.map(c => `<option value="${c.id}" ${estrategiasFiltroCiudad === c.id ? 'selected' : ''}>${c.name}</option>`).join('');
+
+    let lista = lastEstrategiasData;
+    if (estrategiasFiltroCiudad) lista = lista.filter(e => e.ciudad === estrategiasFiltroCiudad);
+    if (estrategiasFiltroTipo) lista = lista.filter(e => e.tipo === estrategiasFiltroTipo);
+
+    function cardEstrategia(e) {
+      const info = ESTRATEGIA_TIPO_INFO[e.tipo] || ESTRATEGIA_TIPO_INFO.general;
+      const fecha = e.updated_at ? new Date(e.updated_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+      return `
+        <div class="atb-compra-card" style="border-left-color:${info.color};">
+          <div class="atb-compra-card-header" style="cursor:default;">
+            <span class="atb-compra-id" style="border-color:${info.color}; color:${info.color};">${info.label}</span>
+            <span class="atb-item-name" style="font-weight:700;">${e.titulo}</span>
+            ${e.ciudad ? `<span class="atb-route">${e.ciudad}</span>` : ''}
+            ${e.item_name ? `<span class="atb-item-name">${itemIcon(e.item_id)}${e.item_name}</span>` : ''}
+            <span style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+              <span style="font-size:10px; color:var(--text-muted);">${fecha}</span>
+              <button class="atb-event-del atb-estrategia-del" data-id="${e.id}">Borrar</button>
+            </span>
+          </div>
+          <div>
+            <textarea class="atb-estrategia-contenido-edit" data-id="${e.id}" rows="3" style="width:100%; font-size:12.5px; resize:vertical;">${(e.contenido || '')}</textarea>
+            <div style="margin-top:6px;"><button class="atb-btn atb-estrategia-guardar" data-id="${e.id}" style="padding:5px 10px; font-size:11px;">Guardar cambios</button></div>
+          </div>
+        </div>`;
+    }
+
+    contentEl.innerHTML = `
+      <div class="atb-tip"><strong>Tip:</strong> tu libreta de notas de estrategias de compra/venta — anota, por ejemplo, "en Caerleon compra mineral T6 antes de las 8pm hora servidor" o "vende pociones en Martlock los fines de semana". Filtra por ciudad o tipo para encontrarlas rápido.</div>
+
+      <div class="atb-event-form">
+        <div class="atb-field" style="grid-column: span 2;"><label for="atb-estr-titulo">Título</label><input type="text" id="atb-estr-titulo" placeholder="ej. Comprar mineral barato en Caerleon"></div>
+        <div class="atb-field"><label for="atb-estr-tipo">Tipo</label>
+          <select id="atb-estr-tipo">
+            <option value="general">General</option>
+            <option value="compra">Compra</option>
+            <option value="venta">Venta</option>
+          </select>
+        </div>
+        <div class="atb-field"><label for="atb-estr-ciudad">Ciudad (opcional)</label><select id="atb-estr-ciudad">${cityOptionsForm}</select></div>
+        <div class="atb-field"><label for="atb-estr-item">Item (opcional)</label><select id="atb-estr-item">${itemOptions}</select></div>
+        <div class="atb-field" style="grid-column: span 2;"><label for="atb-estr-contenido">Contenido</label><textarea id="atb-estr-contenido" rows="3" placeholder="Escribe aquí tu estrategia..." style="width:100%; font-size:12.5px; resize:vertical;"></textarea></div>
+        <button class="atb-btn" id="atb-estr-add">Guardar estrategia</button>
+      </div>
+
+      <div style="display:flex; gap:14px; flex-wrap:wrap; margin: 16px 0;">
+        <div class="atb-field" style="max-width:220px; margin-bottom:0;">
+          <label for="atb-estr-filtro-ciudad">Filtrar por ciudad</label>
+          <select id="atb-estr-filtro-ciudad">${cityOptionsFiltro}</select>
+        </div>
+        <div class="atb-field" style="max-width:220px; margin-bottom:0;">
+          <label for="atb-estr-filtro-tipo">Filtrar por tipo</label>
+          <select id="atb-estr-filtro-tipo">
+            <option value="" ${!estrategiasFiltroTipo ? 'selected' : ''}>Todos</option>
+            <option value="general" ${estrategiasFiltroTipo === 'general' ? 'selected' : ''}>General</option>
+            <option value="compra" ${estrategiasFiltroTipo === 'compra' ? 'selected' : ''}>Compra</option>
+            <option value="venta" ${estrategiasFiltroTipo === 'venta' ? 'selected' : ''}>Venta</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="atb-compra-cards">${lista.map(cardEstrategia).join('') || '<div class="atb-empty">Todavía no tienes estrategias guardadas.</div>'}</div>
+    `;
+
+    document.getElementById('atb-estr-add').addEventListener('click', async () => {
+      const titulo = document.getElementById('atb-estr-titulo').value.trim();
+      const contenido = document.getElementById('atb-estr-contenido').value.trim();
+      if (!titulo || !contenido) {
+        alert('Ingresa un título y el contenido de la estrategia.');
+        return;
+      }
+      await fetch('/api/estrategias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          titulo,
+          contenido,
+          tipo: document.getElementById('atb-estr-tipo').value,
+          ciudad: document.getElementById('atb-estr-ciudad').value,
+          item_id: document.getElementById('atb-estr-item').value,
+        }),
+      });
+      renderEstrategias();
+    });
+
+    document.getElementById('atb-estr-filtro-ciudad').addEventListener('change', (e) => {
+      estrategiasFiltroCiudad = e.target.value;
+      renderEstrategiasBody();
+    });
+    document.getElementById('atb-estr-filtro-tipo').addEventListener('change', (e) => {
+      estrategiasFiltroTipo = e.target.value;
+      renderEstrategiasBody();
+    });
+
+    contentEl.querySelectorAll('.atb-estrategia-guardar').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const textarea = contentEl.querySelector(`.atb-estrategia-contenido-edit[data-id="${id}"]`);
+        await fetch('/api/estrategias/' + id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contenido: textarea.value.trim() }),
+        });
+        renderEstrategias();
+      });
+    });
+
+    contentEl.querySelectorAll('.atb-estrategia-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await fetch('/api/estrategias/' + btn.dataset.id, { method: 'DELETE' });
+        renderEstrategias();
+      });
+    });
+  }
+
+
 
   const RESULTADO_INFO = {
     sin_problema: { label: 'Sin problema', incidente: false, cls: 'atb-profit-pos' },
@@ -3808,6 +4239,13 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
 
 
 
