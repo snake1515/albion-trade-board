@@ -1925,11 +1925,19 @@ def api_inventario():
 
     filas = (supabase.table("inventario").select("*")
              .order("fecha_creacion", desc=True).execute().data or [])
+    if not filas:
+        return jsonify([])
 
     # Precio de mercado actual en la MISMA ciudad donde está guardado cada item,
     # para poder calcular el % de cambio contra lo que pagaste.
     precios = (supabase.table("precios_actuales").select("*").execute().data or [])
     precio_por_item_ciudad = {(p["item_id"], p["city"]): p for p in precios}
+
+    ids = [f["id"] for f in filas]
+    ventas_res = supabase.table("inventario_ventas").select("*").in_("inventario_id", ids).order("fecha", desc=True).execute()
+    ventas_por_fila = {}
+    for v in ventas_res.data:
+        ventas_por_fila.setdefault(v["inventario_id"], []).append(v)
 
     resultado = []
     for f in filas:
@@ -1939,12 +1947,30 @@ def api_inventario():
         pct_cambio = None
         if precio_actual is not None and precio_compra > 0:
             pct_cambio = round(((precio_actual - precio_compra) / precio_compra) * 100, 1)
+
+        # --- Ventas parciales, igual que en "Mis compras" ---
+        # cantidad_disponible_venta = lo que aún no está comprometido en
+        # ninguna venta (pendiente o vendida) — es el tope real para listar
+        # una venta nueva desde este item del inventario.
+        ventas = ventas_por_fila.get(f["id"], [])
+        confirmadas = [v for v in ventas if v.get("estado") == "vendida"]
+        pendientes_v = [v for v in ventas if v.get("estado") != "vendida"]
+        cantidad_comprometida = sum(float(v["cantidad"]) for v in ventas)
+        cantidad_total = float(f["cantidad"])
+        f["ventas"] = ventas
+        f["cantidad_vendida"] = sum(float(v["cantidad"]) for v in confirmadas)
+        f["cantidad_pendiente_venta"] = sum(float(v["cantidad"]) for v in pendientes_v)
+        f["cantidad_disponible_venta"] = round(cantidad_total - cantidad_comprometida, 6)
+        f["ganancia_acumulada"] = round(sum(_ganancia_venta(v, precio_compra) for v in confirmadas), 2)
+        f["ganancia_pendiente_estimada"] = round(sum(_ganancia_venta(v, precio_compra) for v in pendientes_v), 2)
+        f["vendido"] = f["cantidad_disponible_venta"] <= 0.0001 and f["cantidad_pendiente_venta"] <= 0.0001
+
         resultado.append({
             **f,
             "precio_actual": precio_actual,
             "pct_cambio": pct_cambio,
-            "valor_total_compra": round(precio_compra * float(f["cantidad"]), 2),
-            "valor_total_actual": round(precio_actual * float(f["cantidad"]), 2) if precio_actual is not None else None,
+            "valor_total_compra": round(precio_compra * cantidad_total, 2),
+            "valor_total_actual": round(precio_actual * cantidad_total, 2) if precio_actual is not None else None,
         })
     return jsonify(resultado)
 
@@ -1963,7 +1989,166 @@ def api_inventario_editar(inv_id):
 
 @app.route("/api/inventario/<int:inv_id>", methods=["DELETE"])
 def api_inventario_delete(inv_id):
+    supabase.table("inventario_ventas").delete().eq("inventario_id", inv_id).execute()
     supabase.table("inventario").delete().eq("id", inv_id).execute()
+    return jsonify({"deleted": True})
+
+
+@app.route("/api/inventario/<int:inv_id>/vender", methods=["POST"])
+def api_inventario_vender(inv_id):
+    """Registra una venta parcial de un item del inventario — mismo
+    comportamiento que /api/compras/<id>/vender: queda 'pendiente' (la
+    listaste, todavía no se vendió) hasta que la confirmes con
+    /marcar-vendida. El costo base es directamente precio_compra de la
+    fila del inventario (ya es un promedio ponderado si se fusionó)."""
+    body = request.get_json(silent=True) or {}
+    precio_venta = body.get("precio_venta")
+    tax_pct = body.get("tax_pct", 0)
+    tarifa_pct = body.get("tarifa_pct", 0)
+    if precio_venta is None:
+        return jsonify({"error": "precio_venta requerido"}), 400
+
+    fila = supabase.table("inventario").select("*").eq("id", inv_id).single().execute()
+    if not fila.data:
+        return jsonify({"error": "no encontrada"}), 404
+
+    ventas_existentes = supabase.table("inventario_ventas").select("cantidad").eq("inventario_id", inv_id).execute().data
+    ya_comprometida = sum(float(v["cantidad"]) for v in ventas_existentes)
+    restante = round(float(fila.data["cantidad"]) - ya_comprometida, 6)
+
+    cantidad = float(body.get("cantidad") or restante)
+    if cantidad <= 0:
+        return jsonify({"error": "no queda cantidad disponible para vender en este item del inventario"}), 400
+    if cantidad - restante > 0.0001:
+        return jsonify({"error": f"solo quedan {restante} unidades disponibles para vender, no se pueden vender {cantidad}"}), 400
+
+    venta = {
+        "inventario_id": inv_id,
+        "cantidad": cantidad,
+        "precio_venta": precio_venta,
+        "tax_pct": tax_pct,
+        "tarifa_pct": tarifa_pct,
+        "nota": body.get("nota") or None,
+        "estado": "pendiente",
+        "ganancia": _ganancia_venta(
+            {"precio_venta": precio_venta, "tax_pct": tax_pct, "tarifa_pct": tarifa_pct, "cantidad": cantidad},
+            float(fila.data["precio_compra"]),
+        ),
+    }
+    res = supabase.table("inventario_ventas").insert(venta).execute()
+    return jsonify(res.data), 201
+
+
+@app.route("/api/inventario/ventas/<int:venta_id>", methods=["PATCH"])
+def api_inventario_venta_editar(venta_id):
+    """Edita precio/cantidad/nota de una venta parcial de inventario mientras
+    siga 'pendiente' — igual que /api/compras/ventas/<id>."""
+    venta = supabase.table("inventario_ventas").select("*").eq("id", venta_id).single().execute()
+    if not venta.data:
+        return jsonify({"error": "no encontrada"}), 404
+
+    body = request.get_json(silent=True) or {}
+    campos_financieros = {"precio_venta", "cantidad", "tax_pct", "tarifa_pct"}
+    if venta.data.get("estado") == "vendida" and campos_financieros & body.keys():
+        return jsonify({"error": "esta venta ya está confirmada como vendida — no se puede editar el precio/cantidad, solo la nota"}), 400
+
+    cambios = {}
+    for campo in ("precio_venta", "cantidad", "tax_pct", "tarifa_pct"):
+        if campo in body:
+            cambios[campo] = body[campo]
+    if "nota" in body:
+        cambios["nota"] = body["nota"] or None
+    if not cambios:
+        return jsonify({"error": "nada que actualizar"}), 400
+
+    fila = supabase.table("inventario").select("precio_compra").eq("id", venta.data["inventario_id"]).single().execute()
+    precio_compra = float(fila.data["precio_compra"])
+
+    venta_actualizada = {**venta.data, **cambios}
+    cambios["ganancia"] = _ganancia_venta(venta_actualizada, precio_compra)
+
+    res = supabase.table("inventario_ventas").update(cambios).eq("id", venta_id).execute()
+    return jsonify(res.data)
+
+
+@app.route("/api/inventario/ventas/<int:venta_id>/marcar-vendida", methods=["POST"])
+def api_inventario_venta_marcar_vendida(venta_id):
+    res = supabase.table("inventario_ventas").update({
+        "estado": "vendida",
+        "fecha_vendida": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", venta_id).execute()
+    if not res.data:
+        return jsonify({"error": "no encontrada"}), 404
+    return jsonify(res.data)
+
+
+@app.route("/api/inventario/ventas/<int:venta_id>/marcar-pendiente", methods=["POST"])
+def api_inventario_venta_marcar_pendiente(venta_id):
+    res = supabase.table("inventario_ventas").update({
+        "estado": "pendiente",
+        "fecha_vendida": None,
+    }).eq("id", venta_id).execute()
+    if not res.data:
+        return jsonify({"error": "no encontrada"}), 404
+    return jsonify(res.data)
+
+
+@app.route("/api/inventario/ventas/<int:venta_id>", methods=["DELETE"])
+def api_inventario_venta_delete(venta_id):
+    venta = supabase.table("inventario_ventas").select("*").eq("id", venta_id).single().execute()
+    if not venta.data:
+        return jsonify({"error": "no encontrada"}), 404
+    supabase.table("inventario_ventas").delete().eq("id", venta_id).execute()
+    return jsonify({"deleted": True})
+
+
+@app.route("/api/estrategias", methods=["GET", "POST"])
+def api_estrategias():
+    """Libreta de notas de estrategias de compra/venta por ciudad y,
+    opcionalmente, por item — pestaña 'Estrategias' en Registro."""
+    if request.method == "POST":
+        body = request.get_json() or {}
+        titulo = (body.get("titulo") or "").strip()
+        contenido = (body.get("contenido") or "").strip()
+        if not titulo or not contenido:
+            return jsonify({"error": "titulo y contenido son requeridos"}), 400
+        item = ITEMS_BY_ID.get(body.get("item_id")) if body.get("item_id") else None
+        nueva = {
+            "titulo": titulo,
+            "tipo": body.get("tipo") if body.get("tipo") in ("compra", "venta", "general") else "general",
+            "ciudad": body.get("ciudad") or None,
+            "item_id": item["id"] if item else None,
+            "item_name": item["name"] if item else None,
+            "contenido": contenido,
+        }
+        res = supabase.table("estrategias").insert(nueva).execute()
+        return jsonify(res.data), 201
+
+    filas = supabase.table("estrategias").select("*").order("updated_at", desc=True).execute().data or []
+    return jsonify(filas)
+
+
+@app.route("/api/estrategias/<int:estrategia_id>", methods=["PATCH"])
+def api_estrategia_editar(estrategia_id):
+    body = request.get_json(silent=True) or {}
+    cambios = {}
+    for campo in ("titulo", "tipo", "ciudad", "contenido"):
+        if campo in body:
+            cambios[campo] = body[campo] or None
+    if "item_id" in body:
+        item = ITEMS_BY_ID.get(body.get("item_id")) if body.get("item_id") else None
+        cambios["item_id"] = item["id"] if item else None
+        cambios["item_name"] = item["name"] if item else None
+    if not cambios:
+        return jsonify({"error": "nada que actualizar"}), 400
+    cambios["updated_at"] = datetime.now(timezone.utc).isoformat()
+    res = supabase.table("estrategias").update(cambios).eq("id", estrategia_id).execute()
+    return jsonify(res.data)
+
+
+@app.route("/api/estrategias/<int:estrategia_id>", methods=["DELETE"])
+def api_estrategia_delete(estrategia_id):
+    supabase.table("estrategias").delete().eq("id", estrategia_id).execute()
     return jsonify({"deleted": True})
 
 
@@ -2174,6 +2359,13 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
 
 
 
