@@ -1078,6 +1078,60 @@ def api_precios_volumen():
     return jsonify(res.data)
 
 
+@app.route("/api/precios/top-volumen")
+def api_top_volumen():
+    """Top N items por volumen TOTAL de transacciones (suma de unidades
+    compraventidas, sumando todas las ciudades salvo que se filtre una) en
+    el rango de días elegido. Es un ranking de qué tan activo está el
+    mercado de cada item, no de cuál deja más margen — un item puede tener
+    mucho volumen y poco margen, o viceversa. Se cruza con margenes_historico
+    solo para mostrar contexto (mejor ruta/margen más reciente), no para
+    ordenar."""
+    dias = int(request.args.get("dias", 7))
+    limite = int(request.args.get("limite", 10))
+    city = request.args.get("city")
+
+    desde = (datetime.now(timezone.utc) - timedelta(days=dias)).isoformat()
+    query = (supabase.table("volumen_historico")
+             .select("item_id,city,item_count")
+             .gte("ts", desde))
+    if city:
+        query = query.eq("city", city)
+    rows = query.execute().data or []
+
+    total_por_item = {}
+    ciudades_por_item = {}
+    for r in rows:
+        cantidad = r.get("item_count")
+        if cantidad is None:
+            continue
+        iid = r["item_id"]
+        total_por_item[iid] = total_por_item.get(iid, 0) + cantidad
+        ciudades_por_item.setdefault(iid, {})
+        ciudades_por_item[iid][r["city"]] = ciudades_por_item[iid].get(r["city"], 0) + cantidad
+
+    margenes = _ultimo_margen_por_item()
+
+    resultado = []
+    for iid, total in total_por_item.items():
+        ciudades_item = ciudades_por_item.get(iid, {})
+        ciudad_top = max(ciudades_item.items(), key=lambda kv: kv[1])[0] if ciudades_item else None
+        margen = margenes.get(iid)
+        resultado.append({
+            "item_id": iid,
+            "item_name": ITEMS_BY_ID.get(iid, {}).get("name", iid),
+            "volumen_total": int(total),
+            "ciudad_top": ciudad_top,
+            "margin": margen["margin"] if margen else None,
+            "margin_pct": margen["margin_pct"] if margen else None,
+            "origin": margen["origin"] if margen else None,
+            "dest": margen["dest"] if margen else None,
+        })
+
+    resultado.sort(key=lambda x: -x["volumen_total"])
+    return jsonify(resultado[:limite])
+
+
 def _ultimo_margen_por_item():
     """Último registro de margenes_historico por item (el más reciente de cada uno)."""
     rows = (supabase.table("margenes_historico")
@@ -2414,30 +2468,3 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
