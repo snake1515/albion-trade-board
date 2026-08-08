@@ -965,8 +965,63 @@ def api_monturas():
 
 @app.route("/api/precios")
 def api_precios():
-    res = supabase.table("precios_actuales").select("*").execute()
-    return jsonify(res.data)
+    """Estado actual por (item, ciudad). Cuando sell_price_min/buy_price_max
+    están en null (nadie tiene orden activa ahora mismo), se agrega
+    sell_price_min_ref / sell_price_min_ref_date (y el equivalente de
+    compra) con el último precio válido visto en precios_historico, para
+    que 'Promedio item' pueda mostrar una referencia en vez de dejar el
+    campo vacío. Esto es solo un valor de REFERENCIA, no una orden activa
+    — el frontend lo debe marcar como tal."""
+    filas = supabase.table("precios_actuales").select("*").execute().data or []
+
+    pendientes_sell = set()
+    pendientes_buy = set()
+    for f in filas:
+        if f.get("sell_price_min") is None:
+            pendientes_sell.add(f["item_id"])
+        if f.get("buy_price_max") is None:
+            pendientes_buy.add(f["item_id"])
+
+    ref = {}  # (item_id, city, "sell"|"buy") -> {"precio":.., "fecha":..}
+    for item_id in pendientes_sell:
+        hist = (supabase.table("precios_historico")
+                .select("city,sell_price_min,ts")
+                .eq("item_id", item_id)
+                .not_.is_("sell_price_min", "null")
+                .order("ts", desc=True)
+                .limit(200)
+                .execute().data or [])
+        for h in hist:
+            key = (item_id, h["city"], "sell")
+            if key not in ref:
+                ref[key] = {"precio": h["sell_price_min"], "fecha": h["ts"]}
+
+    for item_id in pendientes_buy:
+        hist = (supabase.table("precios_historico")
+                .select("city,buy_price_max,ts")
+                .eq("item_id", item_id)
+                .not_.is_("buy_price_max", "null")
+                .order("ts", desc=True)
+                .limit(200)
+                .execute().data or [])
+        for h in hist:
+            key = (item_id, h["city"], "buy")
+            if key not in ref:
+                ref[key] = {"precio": h["buy_price_max"], "fecha": h["ts"]}
+
+    for f in filas:
+        if f.get("sell_price_min") is None:
+            r = ref.get((f["item_id"], f["city"], "sell"))
+            if r:
+                f["sell_price_min_ref"] = r["precio"]
+                f["sell_price_min_ref_date"] = r["fecha"]
+        if f.get("buy_price_max") is None:
+            r = ref.get((f["item_id"], f["city"], "buy"))
+            if r:
+                f["buy_price_max_ref"] = r["precio"]
+                f["buy_price_max_ref_date"] = r["fecha"]
+
+    return jsonify(filas)
 
 
 @app.route("/api/historial")
@@ -2359,6 +2414,20 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
