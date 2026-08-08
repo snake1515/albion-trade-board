@@ -2562,21 +2562,39 @@
           city,
           venta: rec ? rec.sell_price_min : null,
           compra: rec ? rec.buy_price_max : null,
+          ventaRef: rec ? rec.sell_price_min_ref : null,
+          ventaRefFecha: rec ? rec.sell_price_min_ref_date : null,
+          compraRef: rec ? rec.buy_price_max_ref : null,
+          compraRefFecha: rec ? rec.buy_price_max_ref_date : null,
         };
       });
       const rangoVenta = minMax(porCiudad.map(p => ({ precio: p.venta })));
       const rangoCompra = minMax(porCiudad.map(p => ({ precio: p.compra })));
 
-      const celdas = porCiudad.map(({ venta, compra }) => {
+      function edadTexto(fecha) {
+        if (!fecha) return null;
+        const horas = (Date.now() - new Date(fecha).getTime()) / 3600000;
+        return horas < 1 ? `${Math.round(horas * 60)} min` : `${horas.toFixed(1)} h`;
+      }
+
+      const celdas = porCiudad.map(({ venta, compra, ventaRef, ventaRefFecha, compraRef, compraRefFecha }) => {
         const fmtVenta = (() => {
-          if (venta == null) return `<div style="color:var(--text-muted); font-size:10px;">V: —</div>`;
+          if (venta == null) {
+            if (ventaRef == null) return `<div style="color:var(--text-muted); font-size:10px;">V: —</div>`;
+            const edad = edadTexto(ventaRefFecha);
+            return `<div style="color:var(--text-muted); font-size:10px;" title="Sin orden activa ahora — último precio visto hace ${edad}, no garantizado.">V: ${Math.round(ventaRef).toLocaleString('es-CO')} <span class="atb-stale">●</span> <span style="font-size:9px;">(hace ${edad})</span></div>`;
+          }
           const esMin = venta === rangoVenta.min, esMax = venta === rangoVenta.max;
           const color = esMin ? '#7fc9a3' : (esMax ? '#d97a7a' : 'var(--text)');
           const tag = esMin ? ' 🔽' : (esMax ? ' 🔼' : '');
           return `<div style="color:${color}; font-weight:${esMin || esMax ? '700' : '500'};">V: ${Math.round(venta).toLocaleString('es-CO')}${tag}</div>`;
         })();
         const fmtCompra = (() => {
-          if (compra == null) return `<div style="color:var(--text-muted); font-size:10px;">C: —</div>`;
+          if (compra == null) {
+            if (compraRef == null) return `<div style="color:var(--text-muted); font-size:10px;">C: —</div>`;
+            const edad = edadTexto(compraRefFecha);
+            return `<div style="color:var(--text-muted); font-size:10px;" title="Sin orden activa ahora — último precio visto hace ${edad}, no garantizado.">C: ${Math.round(compraRef).toLocaleString('es-CO')} <span class="atb-stale">●</span> <span style="font-size:9px;">(hace ${edad})</span></div>`;
+          }
           const esMin = compra === rangoCompra.min, esMax = compra === rangoCompra.max;
           // Para compra (lo que te pagan), lo BUENO es que sea alto — por eso
           // el color se invierte respecto a venta: el más alto es el verde.
