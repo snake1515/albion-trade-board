@@ -290,6 +290,7 @@
         <button class="atb-tab atb-tab-menu-item" data-tab="routes">Por ruta</button>
         <button class="atb-tab atb-tab-menu-item" data-tab="spread">Spread</button>
         <button class="atb-tab atb-tab-menu-item" data-tab="precios-hist">Histórico de precios</button>
+        <button class="atb-tab atb-tab-menu-item" data-tab="top-volumen">Top 10 volumen</button>
         <button class="atb-tab atb-tab-menu-item" data-tab="history">Historial</button>
       </div>
     </div>
@@ -383,6 +384,9 @@
   let selectedPreciosHistItem = null;
   let selectedPreciosHistCity = '';
   let selectedPreciosHistDias = '30';
+  let selectedTopVolumenDias = '7';
+  let selectedTopVolumenCiudad = '';
+  let selectedTopVolumenLimite = '10';
   let selectedWeapon = null;
   let routeOriginFilter = '';
   let routeDestFilter = '';
@@ -756,6 +760,7 @@
     'promedio-item': 'busca un item puntual y compara su precio de venta (V) y de compra (C) en las 7 ciudades a la vez — clic en un item para ver su mejor precio y en qué ciudad está.',
     spread: 'oportunidades de comprar y vender un item en la MISMA ciudad, sin transportar nada, aprovechando la diferencia entre lo que pagarías (V) y lo que te pagan (C) ahí mismo.',
     'precios-hist': 'gráfica de cómo se ha movido el precio de un item en el tiempo (para detectar patrones de cuándo comprar barato), más una lista de las mejores rutas de todo el catálogo ahora mismo.',
+    'top-volumen': 'ranking de los items con MÁS unidades compraventidas en el período — el mercado más activo del catálogo. No es lo mismo que el item más rentable: uno puede tener mucho volumen y poco margen, o al revés.',
     history: 'el historial guardado de márgenes de un item específico a lo largo del tiempo — para ver si una ruta que te funcionó antes sigue siendo buena o ya se acabó.',
     orders: 'registra las órdenes que pones en el juego, para medir cuánto tardan en venderse de verdad y así saber qué tan líquido es cada item.',
     compras: 'registra compras que planeas revender pronto — acepta ventas parciales (vender de a poco) y te calcula la ganancia real de cada una.',
@@ -777,6 +782,7 @@
     if (activeTab === 'inversion') { renderInversion(); return; }
     if (activeTab === 'history') { renderHistory(); return; }
     if (activeTab === 'precios-hist') { renderPreciosHistorico(); return; }
+    if (activeTab === 'top-volumen') { renderTopVolumen(); return; }
     if (activeTab === 'events') { renderEvents(); return; }
     if (activeTab === 'spread') { renderSpread(); return; }
     if (activeTab === 'orders') { renderOrders(); return; }
@@ -3924,6 +3930,88 @@
       btn.addEventListener('click', () => {
         selectedPreciosHistItem = btn.dataset.verItem;
         renderPreciosHistorico();
+      });
+    });
+  }
+
+  async function renderTopVolumen() {
+    contentEl.innerHTML = '<div class="atb-empty">Cargando ranking de volumen...</div>';
+
+    const diasOptions = ['7', '30', '90'].map(d => `<option value="${d}" ${d === selectedTopVolumenDias ? 'selected' : ''}>Últimos ${d} días</option>`).join('');
+    const limiteOptions = ['10', '20', '50'].map(l => `<option value="${l}" ${l === selectedTopVolumenLimite ? 'selected' : ''}>Top ${l}</option>`).join('');
+    const cityOptions = `<option value="" ${selectedTopVolumenCiudad === '' ? 'selected' : ''}>Todas las ciudades</option>` +
+      CITIES.map(c => `<option value="${c.id}" ${c.id === selectedTopVolumenCiudad ? 'selected' : ''}>${c.name}</option>`).join('');
+
+    const qs = `dias=${selectedTopVolumenDias}&limite=${selectedTopVolumenLimite}` +
+      (selectedTopVolumenCiudad ? `&city=${encodeURIComponent(selectedTopVolumenCiudad)}` : '');
+
+    let top = [];
+    try {
+      top = await fetch('/api/precios/top-volumen?' + qs).then(r => r.json());
+    } catch (e) {
+      contentEl.innerHTML = `<div class="atb-empty">No se pudo cargar el ranking de volumen: ${e.message}</div>`;
+      return;
+    }
+
+    const barValues = top.map(t => t.volumen_total);
+    const barLabels = top.map(t => t.item_name.length > 14 ? t.item_name.slice(0, 13) + '…' : t.item_name);
+
+    const rows = top.map((t, i) => `
+      <tr>
+        <td style="font-family:'IBM Plex Mono', monospace; color:var(--text-muted);">#${i + 1}</td>
+        <td>${itemIcon(t.item_id)}${t.item_name}</td>
+        <td style="font-family:'IBM Plex Mono', monospace;">${t.volumen_total.toLocaleString('es-CO')}</td>
+        <td>${t.ciudad_top || '—'}</td>
+        <td class="atb-route">${t.origin && t.dest ? `${t.origin}<span class="arrow">→</span>${t.dest}` : '—'}</td>
+        <td class="${t.margin != null ? (t.margin >= 0 ? 'atb-profit-pos' : 'atb-profit-neg') : ''}">${t.margin != null ? Math.round(t.margin).toLocaleString('es-CO') : '—'}</td>
+        <td class="${t.margin_pct != null ? (t.margin_pct >= 0 ? 'atb-profit-pos' : 'atb-profit-neg') : ''}">${t.margin_pct != null ? t.margin_pct + '%' : '—'}</td>
+        <td><button class="atb-btn" style="padding:4px 10px; font-size:11px;" data-ver-item="${t.item_id}">Ver histórico</button></td>
+      </tr>`).join('');
+
+    contentEl.innerHTML = `
+      ${purposeTip('top-volumen')}
+      <div class="atb-controls-grid" style="margin-bottom:16px;">
+        <div class="atb-field">
+          <label for="atb-tv-dias">Rango</label>
+          <select id="atb-tv-dias">${diasOptions}</select>
+        </div>
+        <div class="atb-field">
+          <label for="atb-tv-ciudad">Ciudad</label>
+          <select id="atb-tv-ciudad">${cityOptions}</select>
+        </div>
+        <div class="atb-field">
+          <label for="atb-tv-limite">Cuántos mostrar</label>
+          <select id="atb-tv-limite">${limiteOptions}</select>
+        </div>
+      </div>
+
+      <p class="atb-section-label">Volumen total transado por item</p>
+      <p class="atb-field-hint" style="margin-bottom:8px;">Suma de unidades compraventidas en el rango elegido${selectedTopVolumenCiudad ? '' : ' (todas las ciudades)'} — mientras más alta la barra, más líquido está ese mercado ahora mismo.</p>
+      <canvas id="atb-tv-canvas" style="width:100%; height:220px; display:block; margin-bottom:20px;"></canvas>
+
+      <div style="overflow-x:auto;">
+        <table class="atb-table">
+          <thead><tr><th>#</th><th>Material</th><th>Volumen total</th><th>Ciudad más activa</th><th>Mejor ruta actual</th><th>Margen</th><th>Margen %</th><th></th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="8" class="atb-empty">Sin datos de volumen todavía para este rango — se llena con cada corrida del cron.</td></tr>'}</tbody>
+        </table>
+      </div>
+    `;
+
+    drawAtbBarChart(
+      document.getElementById('atb-tv-canvas'),
+      barValues, barLabels,
+      getComputedStyle(document.body).getPropertyValue('--gold-bright') || '#e8c34a'
+    );
+
+    document.getElementById('atb-tv-dias').addEventListener('change', e => { selectedTopVolumenDias = e.target.value; renderTopVolumen(); });
+    document.getElementById('atb-tv-ciudad').addEventListener('change', e => { selectedTopVolumenCiudad = e.target.value; renderTopVolumen(); });
+    document.getElementById('atb-tv-limite').addEventListener('change', e => { selectedTopVolumenLimite = e.target.value; renderTopVolumen(); });
+    contentEl.querySelectorAll('[data-ver-item]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedPreciosHistItem = btn.dataset.verItem;
+        activeTab = 'precios-hist';
+        updateTabActiveStates();
+        render();
       });
     });
   }
