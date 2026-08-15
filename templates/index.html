@@ -1496,8 +1496,19 @@
       const bruto = precio_venta * cantidad;
       const montoTax = bruto * tax_pct / 100;
       const montoTarifa = bruto * tarifa_pct / 100;
-      const neto = bruto - montoTax - montoTarifa;
-      previewEl.innerHTML = `Bruto: ${Math.round(bruto).toLocaleString('es-CO')} · Impuesto (${tax_pct}%): -${Math.round(montoTax).toLocaleString('es-CO')} · Tarifa (${tarifa_pct}%): -${Math.round(montoTarifa).toLocaleString('es-CO')} · <strong style="color:var(--text);">Recibes: ${Math.round(neto).toLocaleString('es-CO')}</strong>`;
+      // OJO: el juego cobra estas dos cosas en momentos distintos, no juntas.
+      // La tarifa se cobra YA, al publicar/actualizar la orden (se venda o
+      // no) — no sale de la venta. El impuesto solo se cobra SI se llega a
+      // vender, y ahí sí sale del precio de venta. Por eso "recibirás al
+      // venderse" tiene que coincidir con el "Total" que muestra el juego en
+      // el diálogo de la orden — si sumáramos la tarifa ahí también, no
+      // cuadraría contra lo que ves en pantalla.
+      const recibiras = bruto - montoTax;
+      const netoTotal = recibiras - montoTarifa;
+      previewEl.innerHTML = `
+        Tarifa (${tarifa_pct}%, se cobra ya al publicar la orden): <strong style="color:#d97a7a;">-${Math.round(montoTarifa).toLocaleString('es-CO')}</strong><br>
+        Bruto: ${Math.round(bruto).toLocaleString('es-CO')} − Impuesto (${tax_pct}%): -${Math.round(montoTax).toLocaleString('es-CO')} = <strong style="color:var(--text);">Recibirás al venderse: ${Math.round(recibiras).toLocaleString('es-CO')}</strong> (coincide con el "Total" del juego)<br>
+        <span style="color:var(--text-muted);">Neto total de esta venta (tarifa ya restada): ${netoTotal >= 0 ? '+' : ''}${Math.round(netoTotal).toLocaleString('es-CO')}</span>`;
     }
     contentEl.querySelectorAll('.atb-compra-precio-venta, .atb-compra-cant-venta').forEach(inp => {
       inp.addEventListener('input', () => actualizarPreviewVenta(inp.dataset.id));
@@ -2026,8 +2037,12 @@
       const bruto = precio_venta * cantidad;
       const montoTax = bruto * tax_pct / 100;
       const montoTarifa = bruto * tarifa_pct / 100;
-      const neto = bruto - montoTax - montoTarifa;
-      previewEl.innerHTML = `Bruto: ${Math.round(bruto).toLocaleString('es-CO')} · Impuesto (${tax_pct}%): -${Math.round(montoTax).toLocaleString('es-CO')} · Tarifa (${tarifa_pct}%): -${Math.round(montoTarifa).toLocaleString('es-CO')} · <strong style="color:var(--text);">Recibes: ${Math.round(neto).toLocaleString('es-CO')}</strong>`;
+      const recibiras = bruto - montoTax;
+      const netoTotal = recibiras - montoTarifa;
+      previewEl.innerHTML = `
+        Tarifa (${tarifa_pct}%, se cobra ya al publicar la orden): <strong style="color:#d97a7a;">-${Math.round(montoTarifa).toLocaleString('es-CO')}</strong><br>
+        Bruto: ${Math.round(bruto).toLocaleString('es-CO')} − Impuesto (${tax_pct}%): -${Math.round(montoTax).toLocaleString('es-CO')} = <strong style="color:var(--text);">Recibirás al venderse: ${Math.round(recibiras).toLocaleString('es-CO')}</strong> (coincide con el "Total" del juego)<br>
+        <span style="color:var(--text-muted);">Neto total de esta venta (tarifa ya restada): ${netoTotal >= 0 ? '+' : ''}${Math.round(netoTotal).toLocaleString('es-CO')}</span>`;
     }
     contentEl.querySelectorAll('.atb-inv-precio-venta, .atb-inv-cant-venta').forEach(inp => {
       inp.addEventListener('input', () => actualizarPreviewVentaInv(inp.dataset.id));
@@ -4445,4 +4460,6 @@
 </script>
 </body>
 </html>
+
+
 
