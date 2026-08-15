@@ -4043,15 +4043,17 @@
 
   async function renderInversion() {
     contentEl.innerHTML = '<div class="atb-empty">Cargando capital de inversión...</div>';
-    let movimientos, compras, sesionesRecoleccion;
+    let movimientos, compras, sesionesRecoleccion, inventario;
     try {
-      const [capitalRes, comprasRes, sesionesRes] = await Promise.all([fetch('/api/capital'), fetch('/api/compras'), fetch('/api/sesiones-recoleccion')]);
+      const [capitalRes, comprasRes, sesionesRes, inventarioRes] = await Promise.all([fetch('/api/capital'), fetch('/api/compras'), fetch('/api/sesiones-recoleccion'), fetch('/api/inventario')]);
       if (!capitalRes.ok) throw new Error(`/api/capital respondió ${capitalRes.status} — probablemente falta la tabla "capital_movimientos" en Supabase.`);
       if (!comprasRes.ok) throw new Error(`/api/compras respondió ${comprasRes.status} — revisa las tablas "compras_manual"/"compras_ejecuciones"/"compras_ventas" en Supabase.`);
       if (!sesionesRes.ok) throw new Error(`/api/sesiones-recoleccion respondió ${sesionesRes.status} — probablemente falta la tabla "sesiones_recoleccion" o "registro_recoleccion" en Supabase.`);
+      if (!inventarioRes.ok) throw new Error(`/api/inventario respondió ${inventarioRes.status} — revisa las tablas "inventario"/"inventario_ventas" en Supabase.`);
       movimientos = await capitalRes.json();
       compras = await comprasRes.json();
       sesionesRecoleccion = await sesionesRes.json();
+      inventario = await inventarioRes.json();
     } catch (err) {
       contentEl.innerHTML = `<div class="atb-empty" style="color:#d97a7a; text-align:left; padding:20px;">
         <strong>No se pudo cargar la pestaña Inversión.</strong><br><br>
@@ -4076,36 +4078,44 @@
     const comprasCapital = compras.filter(c => (c.origen || 'compra') === 'compra');
     const comprasRecoleccion = compras.filter(c => c.origen === 'recoleccion');
 
+    // Todo lo que hay en Inventario salió de capital (se llega ahí desde una
+    // compra con "Mover a inventario", o agregándolo directo con el
+    // formulario de la pestaña Inventario) — no hay origen "recolección" acá.
+    const inventarioCapital = inventario;
+
     // Capital total que le has dedicado a esto (aportes menos retiros del ledger).
     const capitalAportado = movimientos.reduce((s, m) => s + (m.tipo === 'aporte' ? Number(m.monto) : -Number(m.monto)), 0);
 
     // Capital comprometido = plata metida en compras activas que todavía no
-    // volvió como efectivo. Tres partes:
+    // volvió como efectivo. Dos partes:
     // - lo YA comprado (a su costo real ponderado) que no se ha recuperado
     //   vendiendo (ni confirmado, ni listado-sin-confirmar todavía) —
     //   backend ya lo calcula como cantidad_disponible_venta
-    // - lo movido a INVENTARIO — OJO: el backend resta esto de
-    //   cantidad_disponible_venta como si esa plata ya hubiera vuelto, pero
-    //   moverlo a inventario NO es venderlo, solo cambia de ubicación (pasa
-    //   de "listado en esta orden" a "guardado en el banco"). Si no lo
-    //   sumamos de vuelta aquí, el capital se "libera" solo con el botón
-    //   "Mover a inventario" sin que haya entrado ni un peso — por eso se
-    //   vuelve a agregar explícitamente.
     // - lo que la orden aún no ha llenado, valorado al precio vigente de la
     //   orden (lo que el juego reserva/pediría para completarla)
+    //
+    // OJO — "Mover a inventario" YA NO se suma aquí: en cuanto una unidad
+    // pasa de una compra al inventario, esa plata pasa a ser
+    // responsabilidad del cálculo de INVENTARIO de abajo (que sí sabe si ya
+    // se vendió desde ahí o sigue guardada) — sumarla en los dos lados
+    // contaría el mismo dinero dos veces.
     const capitalComprometido = comprasCapital.reduce((s, c) => {
       const cantidadComprada = Number(c.cantidad_comprada || 0);
-      // Plata que YA salió de tu bolsillo por esta compra: lo pagado en
-      // fills + la tarifa de publicación (esta última se paga aunque no se
-      // haya comprado ni una unidad todavía, por eso NO depende de cantidadComprada).
       const costoTotalGastado = Number(c.costo_total_comprado || 0) + Number(c.tarifa_pagada_orden || 0);
-      const cantidadMovidaInventario = Number(c.cantidad_movida_inventario || 0);
-      const cantidadSinRecuperar = Number(c.cantidad_disponible_venta || 0) + cantidadMovidaInventario;
+      const cantidadSinRecuperar = Number(c.cantidad_disponible_venta || 0);
       const costoSinRecuperar = cantidadComprada > 0
         ? (cantidadSinRecuperar / cantidadComprada) * costoTotalGastado
         : costoTotalGastado;
       const valorOrdenPendiente = Number(c.cantidad_pendiente_compra || 0) * Number(c.precio_oro);
       return s + Math.max(0, costoSinRecuperar) + valorOrdenPendiente;
+    }, 0);
+
+    // Capital comprometido en lo que está guardado en Inventario sin vender
+    // (a su precio de compra real, que ya viene con el costo ponderado si
+    // salió de una compra con tarifa incluida).
+    const capitalComprometidoInventario = inventarioCapital.reduce((s, f) => {
+      const disponible = Number(f.cantidad_disponible_venta ?? f.cantidad);
+      return s + Math.max(0, disponible) * Number(f.precio_compra);
     }, 0);
 
     // Tarifa perdida específicamente por cancelar órdenes — se muestra aparte
@@ -4115,12 +4125,16 @@
       .filter(c => c.estado === 'cancelado')
       .reduce((s, c) => s + Number(c.tarifa_pagada_orden || 0), 0);
 
-    // Ganancia ya realizada (ventas confirmadas) y estimada (listadas, sin confirmar todavía) — SOLO de compras hechas con capital.
-    const gananciaRealizada = comprasCapital.reduce((s, c) => s + Number(c.ganancia_acumulada || 0), 0);
-    const gananciaPendiente = comprasCapital.reduce((s, c) => s + Number(c.ganancia_pendiente_estimada || 0), 0);
+    // Ganancia ya realizada (ventas confirmadas) y estimada (listadas, sin
+    // confirmar todavía) — de compras hechas con capital Y de lo que se vendió
+    // desde Inventario (antes esto último no se sumaba en ningún lado).
+    const gananciaRealizada = comprasCapital.reduce((s, c) => s + Number(c.ganancia_acumulada || 0), 0)
+      + inventarioCapital.reduce((s, f) => s + Number(f.ganancia_acumulada || 0), 0);
+    const gananciaPendiente = comprasCapital.reduce((s, c) => s + Number(c.ganancia_pendiente_estimada || 0), 0)
+      + inventarioCapital.reduce((s, f) => s + Number(f.ganancia_pendiente_estimada || 0), 0);
 
     // Lo que te queda libre para comprar algo nuevo ahora mismo.
-    const capitalDisponible = capitalAportado - capitalComprometido + gananciaRealizada;
+    const capitalDisponible = capitalAportado - capitalComprometido - capitalComprometidoInventario + gananciaRealizada;
 
     // Ganancia de lo recolectado, mostrada aparte para que no se pierda de vista —
     // es plata real, solo que no es "retorno de tu capital", es ingreso de farmeo.
@@ -4178,6 +4192,19 @@
         });
       });
     });
+    // Ventas confirmadas hechas desde Inventario — antes no aparecían acá
+    // para nada, así que ese ingreso nunca se veía reflejado en el capital.
+    inventarioCapital.forEach(f => {
+      (f.ventas || []).filter(v => v.estado === 'vendida').forEach(v => {
+        const precioNeto = Number(v.precio_venta) * (1 - (Number(v.tax_pct || 0) + Number(v.tarifa_pct || 0)) / 100);
+        eventosAuto.push({
+          fecha: v.fecha_vendida || v.fecha,
+          tipo: 'venta',
+          monto: precioNeto * Number(v.cantidad),
+          nota: `Venta (inventario): ${f.item_name} ×${v.cantidad} en ${f.ciudad_banco}`,
+        });
+      });
+    });
     const movimientosManual = movimientos.map(m => ({
       id: m.id, fecha: m.fecha, tipo: m.tipo,
       monto: m.tipo === 'aporte' ? Number(m.monto) : -Number(m.monto),
@@ -4227,9 +4254,9 @@
           <div class="atb-summary-sub">${movimientos.filter(m => m.tipo === 'aporte').length} aporte(s), ${movimientos.filter(m => m.tipo === 'retiro').length} retiro(s)</div>
         </div>
         <div class="atb-summary-card">
-          <h3>Comprometido en compras activas</h3>
-          <div class="atb-summary-value">${Math.round(capitalComprometido).toLocaleString('es-CO')}</div>
-          <div class="atb-summary-sub">${comprasCapital.filter(c => !c.vendido).length} compra(s) sin vender por completo${tarifasPerdidasCanceladas > 0 ? `<br><span style="color:#d97a7a;">incluye ${Math.round(tarifasPerdidasCanceladas).toLocaleString('es-CO')} en tarifas perdidas por ${comprasCapital.filter(c => c.estado === 'cancelado' && Number(c.tarifa_pagada_orden || 0) > 0).length} orden(es) cancelada(s) — esa plata no se recupera</span>` : ''}</div>
+          <h3>Comprometido en compras + inventario</h3>
+          <div class="atb-summary-value">${Math.round(capitalComprometido + capitalComprometidoInventario).toLocaleString('es-CO')}</div>
+          <div class="atb-summary-sub">${comprasCapital.filter(c => !c.vendido).length} compra(s) sin vender por completo · ${Math.round(capitalComprometidoInventario).toLocaleString('es-CO')} guardado en inventario sin vender${tarifasPerdidasCanceladas > 0 ? `<br><span style="color:#d97a7a;">incluye ${Math.round(tarifasPerdidasCanceladas).toLocaleString('es-CO')} en tarifas perdidas por ${comprasCapital.filter(c => c.estado === 'cancelado' && Number(c.tarifa_pagada_orden || 0) > 0).length} orden(es) cancelada(s) — esa plata no se recupera</span>` : ''}</div>
         </div>
         <div class="atb-summary-card">
           <h3>Ganancia realizada (capital)</h3>
@@ -4418,3 +4445,4 @@
 </script>
 </body>
 </html>
+
