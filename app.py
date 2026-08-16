@@ -1549,8 +1549,20 @@ def fetch_and_store_volume(host):
     rows = list(dedup.values())
 
     if rows:
-        supabase.table("volumen_historico").upsert(rows, on_conflict="item_id,city,ts").execute()
-        print(f"Guardado volumen: {len(rows)} puntos (item/ciudad/hora), duplicados ya existentes se ignoran.")
+        # Con el catálogo completo esto puede ser hasta ~300.000 filas de una
+        # sola vez (889 items × 7 ciudades × 48 puntos) — mandarlas todas en
+        # un solo upsert hace que Postgres corte la consulta por timeout
+        # (statement timeout). Se manda en tandas de 2.000 filas.
+        VOLUMEN_UPSERT_CHUNK_SIZE = 2000
+        guardadas = 0
+        for lote in _chunk(rows, VOLUMEN_UPSERT_CHUNK_SIZE):
+            try:
+                supabase.table("volumen_historico").upsert(lote, on_conflict="item_id,city,ts").execute()
+                guardadas += len(lote)
+            except Exception as e:
+                print(f"Error guardando lote de volumen ({len(lote)} filas): {e}")
+                continue
+        print(f"Guardado volumen: {guardadas}/{len(rows)} puntos (item/ciudad/hora), duplicados ya existentes se ignoran.")
 
 
 def fetch_and_store_mount_prices(host):
@@ -3155,6 +3167,7 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
 
 
 
