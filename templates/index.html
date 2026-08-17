@@ -325,7 +325,7 @@
 
   <div class="atb-note">
     <strong>Cómo funciona ahora:</strong> un cron interno en el backend consulta la API del Albion Data Project cada hora y guarda los precios en Supabase.
-    Esta página solo lee lo que el backend ya tiene guardado — el botón "Traer últimos precios" fuerza una actualización manual si no quieres esperar al cron.
+    Esta página solo lee lo que el backend ya tiene guardado — el botón "Traer últimos precios" fuerza una actualización manual si no quieres esperar al cron (corre en segundo plano, tarda 1-2 minutos).
   </div>
 </div>
 
@@ -606,14 +606,26 @@
   async function fetchPrices() {
     const btn = document.getElementById('atb-refresh');
     btn.disabled = true;
-    btn.textContent = 'Consultando...';
-    statusEl.textContent = 'Cargando...';
+    btn.textContent = 'Iniciando...';
+    statusEl.textContent = 'Iniciando actualización...';
     try {
       const res = await fetch('/api/refrescar');
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      await loadPrices();
+      const data = await res.json();
+      // El servidor ya NO espera a que termine — lanza el trabajo en
+      // segundo plano y responde de inmediato (con 892 items el trabajo
+      // tarda más que el límite de tiempo del servidor si se esperara
+      // aquí). Por eso avisamos que va a tardar, y recargamos solos
+      // cuando debería estar listo, sin que el usuario tenga que volver
+      // a pedirlo.
+      statusEl.textContent = data.mensaje || 'Actualización en curso en segundo plano...';
+      btn.textContent = 'Actualizando en 2° plano...';
+      setTimeout(async () => {
+        await loadPrices();
+        statusEl.textContent = 'Precios actualizados.';
+      }, 100000);
     } catch (err) {
-      statusEl.textContent = 'Error al actualizar';
+      statusEl.textContent = 'Error al iniciar la actualización';
     } finally {
       btn.disabled = false;
       btn.textContent = 'Traer últimos precios';
@@ -4460,6 +4472,10 @@
 </script>
 </body>
 </html>
+
+
+
+
 
 
 
