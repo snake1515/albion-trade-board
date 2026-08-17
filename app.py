@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import threading
 from datetime import datetime, timezone, timedelta
 import requests
 from flask import Flask, render_template, jsonify, request
@@ -3151,11 +3152,44 @@ def api_builds():
     return jsonify(res.data)
 
 
+_refresco_lock = threading.Lock()
+_refresco_en_curso = False
+
+
+def _correr_refresco_en_hilo():
+    """Corre fetch_and_store_prices() en un hilo aparte, fuera de la
+    petición HTTP. Necesario desde que el catálogo creció a 892 items: el
+    trabajo (AODP + guardar precios + volumen) ya tarda más que el timeout
+    del worker de gunicorn (por defecto 30s) — si corriera dentro de la
+    misma petición, el worker se muere a mitad de camino (eso causaba los
+    500 / SIGKILL en el botón manual). El cron automático de cada hora ya
+    corre así (en su propio hilo vía APScheduler), por eso nunca falló."""
+    global _refresco_en_curso
+    try:
+        fetch_and_store_prices()
+    finally:
+        with _refresco_lock:
+            _refresco_en_curso = False
+
+
+def _lanzar_refresco_en_segundo_plano():
+    """Devuelve (se_lanzó, mensaje). Evita lanzar dos actualizaciones
+    encimadas si alguien le da doble clic al botón."""
+    global _refresco_en_curso
+    with _refresco_lock:
+        if _refresco_en_curso:
+            return False, "Ya hay una actualización corriendo en segundo plano — espera a que termine antes de pedir otra."
+        _refresco_en_curso = True
+    hilo = threading.Thread(target=_correr_refresco_en_hilo, daemon=True)
+    hilo.start()
+    return True, "Actualización iniciada en segundo plano. Puede tardar 1-2 minutos en completarse — no hace falta pedirla de nuevo, solo espera y vuelve a cargar la pestaña."
+
+
 @app.route("/api/refrescar")
 def api_refrescar():
     """Endpoint sin token, para el botón manual dentro de la propia página."""
-    fetch_and_store_prices()
-    return jsonify({"status": "ok"})
+    lanzado, mensaje = _lanzar_refresco_en_segundo_plano()
+    return jsonify({"status": "iniciado" if lanzado else "ya_en_curso", "mensaje": mensaje})
 
 
 @app.route("/api/cron/actualizar-precios")
@@ -3164,12 +3198,19 @@ def api_cron_trigger():
     token = request.args.get("token", "")
     if CRON_SECRET and token != CRON_SECRET:
         return jsonify({"error": "no autorizado"}), 401
-    fetch_and_store_prices()
-    return jsonify({"status": "ok"})
+    lanzado, mensaje = _lanzar_refresco_en_segundo_plano()
+    return jsonify({"status": "iniciado" if lanzado else "ya_en_curso", "mensaje": mensaje})
 
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
+
+
+
+
+
 
 
 
