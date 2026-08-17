@@ -44,6 +44,9 @@ ITEMS = [
     {"id": "T6_ORE", "name": "Mineral de runita T6", "tier": 6, "peso": 2.1},
     {"id": "T7_ORE", "name": "Mineral de meteorito T7", "tier": 7, "peso": 2.45},
     {"id": "T8_ORE", "name": "Mineral de adamantio T8", "tier": 8, "peso": 2.8},
+    {"id": "T1_HIDE", "name": "Piel áspera T1", "tier": 1, "peso": 0.7},
+    {"id": "T1_WOOD", "name": "Troncos en bruto T1", "tier": 1, "peso": 0.7},
+    {"id": "T1_ROCK", "name": "Guijarros T1", "tier": 1, "peso": 0.7},
     {"id": "T2_HIDE", "name": "Piel dura T2", "tier": 2, "peso": 0.7},
     {"id": "T3_HIDE", "name": "Piel fina T3", "tier": 3, "peso": 1.05},
     {"id": "T4_HIDE", "name": "Piel media T4", "tier": 4, "peso": 1.4},
@@ -3167,6 +3170,8 @@ def api_cron_trigger():
 
 if __name__ == "__main__":
     app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
+
+
 
 
 
